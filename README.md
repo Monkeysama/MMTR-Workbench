@@ -1,8 +1,6 @@
 # MMTR Workbench
 
-用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器，当前版本 **0.3.0**。前端使用 Vue 3 + TypeScript，桌面宿主使用 Tauri 2，Python 核心负责解析、重建、验证和标准 stdio MCP。
-
-本项目从 [mmtr-research](https://github.com/Monkeysama/mmtr-research) 独立迁移，专注编辑器产品与 MCP；原研究仓库及文件完整保留。
+用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。当前仅支持怪物猎人荒野。
 
 ## 功能
 
@@ -16,7 +14,7 @@
 
 ## 使用
 
-便携包解压后运行 `MMTR Workbench.exe`，保留同目录的 `mmtr-core.exe`。在工具设置中配置自己的 Microsoft `dxcompiler.dll`；DLL 和游戏资产不随仓库提供。打开、浏览与原样另存不需要 DXC。
+下载后解压运行 `MMTR Workbench.exe`，保留同目录的 `mmtr-core.exe`。在工具设置中配置自己的 Microsoft `dxcompiler.dll`；DLL 和游戏资产不随仓库提供。打开、浏览与原样另存不需要 DXC。
 
 工具保护当前打开的源文件，编辑结果必须另存。工具本身不自动安装 MOD。详细操作见[使用说明](工具使用说明.md)，智能体连接见[MCP 使用说明](docs/workbench-mcp.md)。
 
@@ -61,5 +59,4 @@ npm run package
 
 - [开发与验证](docs/development.md)
 - [架构与边界](docs/architecture.md)
-- [迁移记录与已知问题](docs/migration.md)
 - [MIT License](LICENSE)
