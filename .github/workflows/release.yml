@@ -1,0 +1,105 @@
+name: Tag release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: '验证构建版本，例如v1.0.0；手动运行只上传Artifacts，不发布Release'
+        required: true
+        default: 'v0.3.0'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release-${{ github.ref }}-${{ inputs.version_tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version_tag }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set version from tag
+        id: version
+        run: python scripts/set_release_version.py --tag "$env:RELEASE_TAG" --github-output "$env:GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -r requirements-editor.txt
+      - run: npm run test:core
+      - run: npm run test:mcp
+      - run: npm run test:frontend
+      - name: Build desktop on GitHub runner
+        run: npm run desktop:build
+      - name: Package portable app
+        run: python scripts/package_editor.py --mcp-command 'C:\Tools\MMTR-Workbench\mmtr-core.exe'
+      - name: Check frozen MCP and package
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python scripts/smoke_workbench_standalone.py --executable release/MMTR-Workbench/mmtr-core.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_release_package.py --version "$env:RELEASE_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          path: |
+            release/MMTR-Workbench-${{ steps.version.outputs.version }}-windows-x64.zip
+            release/SHA256SUMS.txt
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-${{ needs.build.outputs.version }}
+          path: release
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          archive="release/MMTR-Workbench-${RELEASE_VERSION}-windows-x64.zip"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$archive" release/SHA256SUMS.txt --clobber
+          else
+            flags=()
+            if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" "$archive" release/SHA256SUMS.txt \
+              --verify-tag --title "MMTR Workbench ${RELEASE_VERSION}" --generate-notes "${flags[@]}"
+          fi

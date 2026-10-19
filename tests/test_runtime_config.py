@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from mmtr_editor import __version__
 from mmtr_editor.rpc import Service
 
 
@@ -20,4 +21,4 @@ class RuntimeConfigTests(unittest.TestCase):
             with patch.dict(os.environ, {'MMTR_DXC_PATH': str(dll)}):
                 result = Service().handle({'op': 'ping'})
             self.assertEqual(result['dxc'], str(dll.resolve()))
-            self.assertEqual(result['version'], '0.3.0')
+            self.assertEqual(result['version'], __version__)

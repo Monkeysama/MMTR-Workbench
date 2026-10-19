@@ -13,6 +13,7 @@ site.addsitedir(str(ROOT / '.build' / 'editor-deps'))
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mmtr_editor import __version__
 
 
 # 每个调用经过实际子进程和协议schema；不通过直接调用Service冒充MCP链路。
@@ -29,7 +30,7 @@ async def verify(args):
         async with stdio_client(params, errlog=errors) as (reader, writer):
             async with ClientSession(reader, writer, read_timeout_seconds=360) as session:
                 initialized = await session.initialize()
-                assert initialized.server_info.version == '0.3.0', initialized
+                assert initialized.server_info.version == __version__, initialized
                 tools = await session.list_tools()
                 assert len(tools.tools) == 20, len(tools.tools)
                 assert all(tool.output_schema for tool in tools.tools)

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, help='独立便携目录，避免覆盖运行中的旧EXE')
+    parser.add_argument('--mcp-command', help='发布包中示例MCP可执行文件路径，避免写入CI runner的临时目录')
     args = parser.parse_args()
     built = ROOT / 'src-tauri' / 'target' / 'release'
     dest = args.output_dir.resolve() if args.output_dir else ROOT / 'release' / 'MMTR-Workbench'
@@ -28,7 +29,7 @@ def main():
         '](docs/workbench-mcp.md)', '](MCP使用说明.md)'), encoding='utf-8')
     # 配置只随便携包交付，不改客户端全局设置；移动文件夹后需更新command。
     configuration = {'mcpServers': {'mmtr-workbench': {
-        'command': str((dest / 'mmtr-core.exe').resolve()), 'args': ['--mcp']}}}
+        'command': args.mcp_command or str((dest / 'mmtr-core.exe').resolve()), 'args': ['--mcp']}}}
     (dest / 'mcp-config.json').write_text(json.dumps(configuration, ensure_ascii=False, indent=2), encoding='utf-8')
     shutil.copy2(ROOT / 'docs' / 'workbench-mcp.md', dest / 'MCP使用说明.md')
     names = [name for _, name in mapping] + ['mcp-config.json', 'MCP使用说明.md']

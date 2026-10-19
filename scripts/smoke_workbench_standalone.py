@@ -14,6 +14,7 @@ site.addsitedir(str(ROOT / '.build' / 'editor-deps'))
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from test_mdf_editing import fixture
+from mmtr_editor import __version__
 
 
 # 每个编辑/导出操作经过协议，错误反例验证服务端整批回滚；临时文件归本进程所有。
@@ -30,7 +31,7 @@ async def verify(executable, dxc=None):
             async with ClientSession(reader, writer) as client:
                 initialized = await client.initialize()
                 tools = await client.list_tools()
-                assert initialized.server_info.version == '0.3.0'
+                assert initialized.server_info.version == __version__
                 assert len(tools.tools) == 20
 
                 async def call(name, **args):
@@ -67,7 +68,7 @@ async def verify(executable, dxc=None):
                 other = await call('inspect', kind='material', index=1)
                 assert other['master'] == 'MaterialShader/test.mmtr'
                 assert source.read_bytes() == original
-    return {'passed': True, 'tools': 20, 'version': '0.3.0', 'command': command,
+    return {'passed': True, 'tools': 20, 'version': __version__, 'command': command,
             'temporary_cwd': True, 'synthetic_input_only': True, 'game_tested': False, 'native_compile_checked': bool(dxc),
             'executable_sha256': hashlib.sha256(Path(executable).read_bytes()).hexdigest() if executable else None}
 
