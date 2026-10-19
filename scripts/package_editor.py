@@ -42,7 +42,8 @@ def main():
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
         for name in names + ['manifest.json']:
             output.write(dest / name, 'MMTR-Workbench/' + name)
-    print(json.dumps({'directory': str(dest), 'archive': str(archive), 'files': manifest}, ensure_ascii=False, indent=2))
+    # 控制台可能是Windows cp1252；JSON日志转义非ASCII，磁盘文件仍保留UTF-8中文。
+    print(json.dumps({'directory': str(dest), 'archive': str(archive), 'files': manifest}, ensure_ascii=True, indent=2))
 
 
 if __name__ == '__main__':

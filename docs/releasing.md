@@ -14,3 +14,7 @@ Release附件为 `MMTR-Workbench-1.0.0-windows-x64.zip` 和 `SHA256SUMS.txt`。Z
 只需仓库自带的 `GITHUB_TOKEN`，发布job拥有contents:write，构建job只读；不需要额外PAT。GitHub仓库需启用Actions，并允许工作流写入Releases。重跑同tag工作流会更新同名附件，tag仍指向原提交；不要靠移动已发布tag更新源码。
 
 Actions页面也可手动运行 **Tag release**，输入如 `v1.0.0` 进行云端验证。手动运行只生成Actions Artifacts，不创建或更新Release；正式发布仍由推送tag触发。常规分支CI不会重复执行tag构建。
+
+Windows构建统一启用Python UTF-8；打包脚本的控制台JSON转义非ASCII，避免系统代码页导致中文文件名输出失败。包内中文文件名与说明仍使用UTF-8。
+
+加速采用npm、pip下载缓存和Rust编译依赖缓存。Rust缓存由手动桌面检查和发布工作流共享；默认分支上的手动验证可建立后续tag可读取的缓存。缓存也会在失败任务结束时保存有效的Rust依赖，但当前源码、Python冻结核心及发布ZIP每次重新构建。首次运行、缓存失效或Rust工具链/依赖变化仍可能完整编译；不要把第一次耗时当作缓存命中的耗时。Actions分别显示Python核心与Tauri桌面步骤，便于定位瓶颈；已压缩ZIP上传Artifact时不再重复压缩。
