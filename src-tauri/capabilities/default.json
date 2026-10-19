@@ -1,0 +1,12 @@
+{
+  "identifier": "main",
+  "description": "Local MMTR file dialogs and window lifecycle",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-destroy",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-confirm"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "mmtr-workbench",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "vue-tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "npm run core:build && tauri build --no-bundle",
+    "core:build": "python scripts/build_editor_core.py",
+    "package": "npm run desktop:build && python scripts/package_editor.py",
+    "test:core": "python scripts/test_core.py",
+    "test:frontend": "node --experimental-strip-types --test tests/dxil-readable.test.ts tests/source-trace.test.ts tests/mdf-editing.test.ts",
+    "test:readable": "node --experimental-strip-types --test tests/dxil-readable.test.ts",
+    "mcp": "python scripts/run_mcp.py",
+    "test:mcp": "python scripts/test_mcp.py",
+    "setup:hooks": "git config core.hooksPath .githooks"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "element-plus": "^2.14.7",
+    "lucide-vue-next": "^0.468.0",
+    "vue": "^3.5.22"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "@types/node": "^24.7.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vue-tsc": "^3.1.0"
+  }
+}
