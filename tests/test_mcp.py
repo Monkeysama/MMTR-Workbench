@@ -24,7 +24,8 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        self.root = Path(self.folder.name)
+        # Windows runner的TEMP可能含8.3短路径；与导出预检统一使用解析后的文件身份。
+        self.root = Path(self.folder.name).resolve()
         self.source = self.root / '原始.mdf2.45'
         self.source.write_bytes(fixture())
         self.state = WorkbenchSession()
