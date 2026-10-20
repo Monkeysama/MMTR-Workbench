@@ -64,10 +64,11 @@ def material_reads(ir):
             continue
         kind = handles[hm[1]]
         register, base, stride = None, None, None
-        cb = re.fullmatch(r'call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32\(i32 59, %dx.types.Handle %\w+, i32 (\d+)\)', text)
+        # 自定义Shader可直接按float读取同一材质CB；地址证明和字段迁移与整数读取相同。
+        cb = re.fullmatch(r'call %dx\.types\.CBufRet\.(i32|f32) @dx\.op\.cbufferLoadLegacy\.\1\(i32 59, %dx.types.Handle %\w+, i32 (\d+)\)', text)
         raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle %\w+, i32 (%\w+), i32 (0|undef), i8 (\d+), i32 4\)', text)
         if cb and kind == 'cb':
-            register = int(cb[1])
+            register = int(cb[2])
         elif raw:
             address = definitions[raw[1]]['text']
             add = re.fullmatch(r'(?:add(?: nuw)?(?: nsw)?|or) i32 (%\w+), (\d+)', address)
@@ -87,8 +88,9 @@ def material_reads(ir):
         if register is None:
             raise ValueError(f'未知材质读取：{text}')
         extracts = []
+        aggregate = 'CBufRet.' + cb[1] if cb else 'ResRet.i32'
         for user in uses[value]:
-            ex = re.fullmatch(r'extractvalue %dx.types.(?:CBufRet|ResRet).i32 ' + re.escape(value) + r', ([0-3])', user['text'])
+            ex = re.fullmatch(r'extractvalue %dx.types.' + re.escape(aggregate) + ' ' + re.escape(value) + r', ([0-3])', user['text'])
             if not ex:
                 raise ValueError(f'材质aggregate有未支持的消费者：{user["text"]}')
             extracts.append({'ssa': user['value'], 'lane': int(ex[1]), 'offset': register * 16 + int(ex[1]) * 4})

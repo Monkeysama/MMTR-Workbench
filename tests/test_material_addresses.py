@@ -33,6 +33,58 @@ def marked_bytes(layout):
 
 
 class MaterialAddressesTests(unittest.TestCase):
+    # 自定义效果会直接用f32读取heap材质CB；扩容后参数不动、资源逐字段迁移。
+    def test_float_cb_reads_preserve_parameters_and_relocate_tail(self):
+        for register, lanes in [(59, range(4)), (60, range(4)), (65, range(4)), (66, [0])]:
+            original = cb_ir(register, lanes).replace('CBufRet.i32', 'CBufRet.f32').replace(
+                'cbufferLoadLegacy.i32', 'cbufferLoadLegacy.f32')
+            with self.subTest(register=register):
+                actual, _ = relocate_material_reads(original, OLD, NEW)
+                before = {ex['ssa']: ex['offset'] for r in material_reads(original) for ex in r['extracts']}
+                after = {ex['ssa']: ex['offset'] for r in material_reads(actual) for ex in r['extracts']}
+                for ssa, offset in before.items():
+                    self.assertEqual(after[ssa], OLD.offset_in(offset, NEW))
+                    self.assertEqual(marked_bytes(OLD)[offset:offset+4],
+                                     marked_bytes(NEW)[after[ssa]:after[ssa]+4])
+                self.assertNotIn('CBufRet.i32', actual)
+                self.assertNotIn('cbufferLoadLegacy.i32', actual)
+                if register == 59:
+                    self.assertEqual(actual, original)
+
+    def test_float_cb_unknown_tail_and_aggregate_consumer_still_rejected(self):
+        original = cb_ir(66, [1]).replace('CBufRet.i32', 'CBufRet.f32').replace(
+            'cbufferLoadLegacy.i32', 'cbufferLoadLegacy.f32')
+        with self.assertRaisesRegex(ValueError, '资源身份'):
+            relocate_material_reads(original, OLD, NEW)
+        original = cb_ir(60, [0]).replace('CBufRet.i32', 'CBufRet.f32').replace(
+            'cbufferLoadLegacy.i32', 'cbufferLoadLegacy.f32').replace(
+                '  ret void', '  call void @escape(%dx.types.CBufRet.f32 %load)\n  ret void')
+        with self.assertRaisesRegex(ValueError, 'aggregate'):
+            relocate_material_reads(original, OLD, NEW)
+
+    # 模拟已有fresnel参数的材质连续扩展，避免把有效索引留在旧参数地址。
+    def test_custom_material_three_textures_and_nine_parameters(self):
+        old = MaterialTailLayout(1024, tuple(f'tex{i}' for i in range(21)), ('gp0', 'gp1', 'gp2', 'gp3'))
+        original = cb_ir(64, range(4))
+        float_load = cb_ir(59, [0]).replace('CBufRet.i32', 'CBufRet.f32').replace(
+            'cbufferLoadLegacy.i32', 'cbufferLoadLegacy.f32')
+        for initial in (original, float_load, cb_ir(69, range(4)), cb_ir(70, [0])):
+            before = {ex['ssa']: ex['offset'] for r in material_reads(initial) for ex in r['extracts']}
+            actual, current = initial, old
+            for i in range(3):
+                target = MaterialTailLayout(1024, current.texture_names + (f'newTex{i}',), current.gpbf_names)
+                actual, _ = relocate_material_reads(actual, current, target)
+                current = target
+            for _ in range(9):
+                target = MaterialTailLayout(current.parameter_bytes + 16, current.texture_names, current.gpbf_names)
+                actual, _ = relocate_material_reads(actual, current, target)
+                current = target
+            for read in material_reads(actual):
+                for ex in read['extracts']:
+                    offset = before[ex['ssa']]
+                    expected = offset if offset < 1024 else offset + 144 + (12 if offset >= 1108 else 0)
+                    self.assertEqual(ex['offset'], expected)
+
     def test_texture_then_parameter_extension_allocates_distinct_ssa_names(self):
         old = MaterialTailLayout(944, tuple(f'tex{i}' for i in range(21)), ('gp0', 'gp1', 'gp2'))
         middle = MaterialTailLayout(944, old.texture_names + ('newTex',), old.gpbf_names)
