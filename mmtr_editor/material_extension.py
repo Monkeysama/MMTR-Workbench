@@ -302,7 +302,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
         tables, texture_shaders = texture_tables(document, old, record_index)
     new = MaterialTailLayout(new_size, old.texture_names+((texture,) if texture else ()), old.gpbf_names)
     candidate = copy.deepcopy(document)
-    reports, registers = [], {}
+    reports, registers, reflections = [], {}, {}
     compiler = DxilAssembly(dll)
     try:
         for shader in info['shaders']:
@@ -310,11 +310,15 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             original = document.shader_bytes(index)
             ir = compiler.disassemble(original)
             before = reflection(ir)
+            reflections[index] = hashlib.sha256(original).digest(), before
             has_cb = parameter and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
             has_texture = index in texture_shaders
-            edited, register = patch_declarations(ir, old.parameter_bytes, new_size,
+            # 未修改声明的Shader保持原文本；同一源只解析一次供计划和编译后对照使用。
+            edited, register = (patch_declarations(ir, old.parameter_bytes, new_size,
                                                   parameter if has_cb else None, texture if has_texture else None)
-            edited, relocation = relocate_material_reads(edited, old, new)
+                                if has_cb or has_texture else (ir, None))
+            reads = material_reads(ir)
+            edited, relocation = relocate_material_reads(edited, old, new, reads=reads)
             if not has_cb and not has_texture and not relocation['relocated_extracts'] and not (
                     relocation['instance_stride_ssa'] and old.parameter_bytes != new_size):
                 continue
@@ -328,13 +332,15 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             payload, _ = compiler.validate(replace_chunks(assembled, {'STAT': chunks(reflected)['STAT']}))
             actual = compiler.disassemble(payload)
             after = reflection(actual)
+            reflections[index] = hashlib.sha256(payload).digest(), after
             if bodies(actual) != bodies(edited) or interface_chunks(original) != interface_chunks(payload):
                 raise EditError(f'Shader #{index} 的原计算/签名出现意外变化。')
-            previous_reads = {ex['ssa']: ex['offset'] for r in material_reads(ir) if r['kind'] != 'instance' for ex in r['extracts']}
-            actual_reads = {ex['ssa']: ex['offset'] for r in material_reads(actual) if r['kind'] != 'instance' for ex in r['extracts']}
+            previous_reads = {ex['ssa']: ex['offset'] for r in reads if r['kind'] != 'instance' for ex in r['extracts']}
+            compiled_reads = material_reads(actual)
+            actual_reads = {ex['ssa']: ex['offset'] for r in compiled_reads if r['kind'] != 'instance' for ex in r['extracts']}
             if any(actual_reads.get(ssa) != old.offset_in(offset, new) for ssa, offset in previous_reads.items()):
                 raise EditError(f'Shader #{index} 编译后材质字段读取不一致。')
-            if any(r['stride']['bytes'] != new_size for r in material_reads(actual) if r['kind'] == 'instance'):
+            if any(r['stride']['bytes'] != new_size for r in compiled_reads if r['kind'] == 'instance'):
                 raise EditError('编译后参数实例步长不一致。')
             if before['structured_buffers'] != after['structured_buffers']:
                 raise EditError('结构化缓冲反射发生意外变化。')
@@ -391,7 +397,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             pointer = struct.unpack_from('<Q', rebuilt, base+0x88)[0]
             if rebuilt[pointer:pointer+count*8] != original_data[old_pointer:old_pointer+count*8]:
                 raise EditError('原SRV绑定映射被改变。')
-    validation = candidate.validate_metadata_interfaces(dll, _in_worker=True)
+    validation = candidate.validate_metadata_interfaces(dll, _in_worker=True, _reflections=reflections)
     if not validation['valid']:
         raise EditError(f'新增接口验证失败：{validation["issues"][0]}')
     document.replacements, document.replacement_notes = candidate.replacements, candidate.replacement_notes

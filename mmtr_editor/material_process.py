@@ -86,4 +86,7 @@ def extend_in_worker(document, material, dll, **arguments):
         raise EditError('接口同步结果完整性检查失败。')
     document.replacements, document.replacement_notes = candidate.replacements, candidate.replacement_notes
     document.metadata_edits = candidate.metadata_edits
+    document._build_cache = candidate._build_cache
+    # 父进程已核对完整候选hash和子进程验证结果；相同字节导出无需再次启动DXC全量验证。
+    document.remember_validation(dll, result['report']['validation'])
     return result['report']

@@ -37,13 +37,16 @@ def material_reads(ir):
     definitions, uses, _ = parse(ir)
     origins = handle_sources(ir, definitions)
     for row in definitions.values():
+        if not row['text'].startswith('call %dx.types.Handle @dx.op.annotateHandle('):
+            continue
         annotated = re.fullmatch(
             r'call %dx.types.Handle @dx.op.annotateHandle\(i32 216, %dx.types.Handle (%\w+), '
             r'%dx.types.ResourceProperties \{ i32 13, i32 (\d+) \}\)', row['text'])
         if (annotated and '@dx.op.createHandleFromHeap' in definitions.get(annotated[1], {}).get('text', '')
                 and int(annotated[2]) != 32768):
             raise ValueError('heap常量缓冲尺寸不是已验证的32768B材质布局。')
-    handles = {key: 'cb' for key, row in definitions.items() if re.fullmatch(
+    handles = {key: 'cb' for key, row in definitions.items()
+               if row['text'].startswith('call %dx.types.Handle @dx.op.annotateHandle(') and re.fullmatch(
         r'call %dx.types.Handle @dx.op.annotateHandle\(i32 216, %dx.types.Handle %\w+, '
         r'%dx.types.ResourceProperties \{ i32 13, i32 32768 \}\)', row['text'])}
     for key in handles:
@@ -103,11 +106,28 @@ def material_reads(ir):
 
 
 # 仅重写经来源证明的读取和参数实例步长；保留所有原计算/控制流，用新命名SSA避免重排编号。
-def relocate_material_reads(ir, old, new):
+def relocate_material_reads(ir, old, new, *, reads=None):
     if old.parameter_bytes % 16 or new.parameter_bytes % 16 or new.parameter_bytes < old.parameter_bytes:
         raise ValueError('只接受16字节对齐的参数区末尾扩容。')
-    reads = material_reads(ir)
+    reads = material_reads(ir) if reads is None else reads
     replacements, changes, strides = {}, [], {}
+    # 每个SSA只索引一次，按行构造候选；不为每处迁移全文搜索/替换。
+    lines = ir.splitlines(keepends=True)
+    anchors = {}
+    for line_index, line in enumerate(lines):
+        match = re.match(r'^  (%\w+) = ', line)
+        if match:
+            anchors.setdefault(match[1], []).append(line_index)
+
+    def anchor(ssa):
+        indexes = anchors.get(ssa, [])
+        if len(indexes) != 1:
+            raise ValueError('IR替换锚点不唯一。')
+        index = indexes[0]
+        if not lines[index].endswith('\n'):
+            raise ValueError('IR替换锚点缺少换行。')
+        return index, lines[index].rstrip('\r\n')
+
     # 同一会话可连续追加纹理和参数；前一次生成的SSA仍在IR中，后续必须分配新名称。
     used_names = set(re.findall(r'^\s*(%\w+)\s*=', ir, re.M))
     for read in reads:
@@ -118,8 +138,8 @@ def relocate_material_reads(ir, old, new):
             strides[stride['ssa']] = stride
             if read['address_rhs'].startswith('or '):
                 address = read['address_ssa']
-                anchor = re.search(r'^  ' + re.escape(address) + r' = .*$', ir, re.M)[0]
-                replacements[anchor] = f'  {address} = ' + read['address_rhs'].replace('or ', 'add ', 1)
+                line_index, _ = anchor(address)
+                replacements[line_index] = f'  {address} = ' + read['address_rhs'].replace('or ', 'add ', 1)
         wanted = {}
         for ex in read['extracts']:
             if read['kind'] == 'instance':
@@ -148,22 +168,25 @@ def relocate_material_reads(ir, old, new):
                 additions.append(f'  {address} = add i32 {read["base"]}, {reg}')
                 text = read['text'].replace(f'i32 {read["raw"][0]},', f'i32 {address},')
             additions.append(f'  {name} = {text}')
-        anchor = re.search(r'^  ' + re.escape(read['ssa']) + r' = .*$', ir, re.M)[0]
-        replacements[anchor] = anchor + '\n' + '\n'.join(additions)
+        line_index, line = anchor(read['ssa'])
+        replacements[line_index] = line + '\n' + '\n'.join(additions)
         for ssa, (ex, target) in wanted.items():
             pattern = r'^  ' + re.escape(ssa) + r' = extractvalue (.*) ' + re.escape(read['ssa']) + r', [0-3](?:  ;.*)?$'
-            match = re.search(pattern, ir, re.M)
-            assert match
-            replacements[match[0]] = f'  {ssa} = extractvalue {match[1]} {group_names[target//16]}, {target%16//4}'
+            line_index, line = anchor(ssa)
+            match = re.fullmatch(pattern.removeprefix('^').removesuffix('$'), line)
+            if not match:
+                raise ValueError('IR取值锚点与已解析的材质读取不一致。')
+            replacements[line_index] = f'  {ssa} = extractvalue {match[1]} {group_names[target//16]}, {target%16//4}'
             changes.append({'ssa': ssa, 'kind': read['kind'], 'old_offset': ex['offset'], 'new_offset': target})
     for ssa, stride in strides.items():
-        match = re.search(r'^  ' + re.escape(ssa) + r' = (.*)$', ir, re.M)
-        updated = re.sub(r', ' + str(old.parameter_bytes) + r'$', f', {new.parameter_bytes}', match[1])
-        replacements[match[0]] = f'  {ssa} = {updated}'
-    for old_text, new_text in replacements.items():
-        if ir.count(old_text + '\n') != 1:
-            raise ValueError('IR替换锚点不唯一。')
-        ir = ir.replace(old_text + '\n', new_text + '\n', 1)
+        line_index, line = anchor(ssa)
+        rhs = line.split(' = ', 1)[1]
+        updated = re.sub(r', ' + str(old.parameter_bytes) + r'$', f', {new.parameter_bytes}', rhs)
+        replacements[line_index] = f'  {ssa} = {updated}'
+    if not replacements:
+        return ir, {'loads': len(reads), 'relocated_extracts': changes,
+                    'instance_stride_ssa': sorted(strides), 'new_stride': new.parameter_bytes}
+    ir = ''.join(replacements[i] + '\n' if i in replacements else line for i, line in enumerate(lines))
     # 独立解析迁移后的取值源，不以计划替代实际文本。
     before = {ex['ssa']: ex['offset'] for read in reads if read['kind'] != 'instance' for ex in read['extracts']}
     after_reads = material_reads(ir)

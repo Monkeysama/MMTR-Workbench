@@ -1,5 +1,6 @@
 """材质尾部迁移语义测试：按字段标记字验证读取，保留错误候选作为阴性对照。"""
 from pathlib import Path
+from unittest.mock import patch
 import json
 import re
 import struct
@@ -33,6 +34,21 @@ def marked_bytes(layout):
 
 
 class MaterialAddressesTests(unittest.TestCase):
+    def test_no_change_avoids_reparse_and_changed_candidate_is_checked(self):
+        from mmtr_editor.material_addresses import material_reads as parse_reads
+        for register, expected_calls in ((59, 1), (60, 2)):
+            ir = cb_ir(register, [0])
+            with self.subTest(register=register), patch(
+                    'mmtr_editor.material_addresses.material_reads', wraps=parse_reads) as parser:
+                relocate_material_reads(ir, OLD, NEW)
+                self.assertEqual(parser.call_count, expected_calls)
+
+    def test_duplicate_ssa_anchor_rejected_before_line_rewrite(self):
+        ir = cb_ir(60, [0]).replace('  ret void',
+            '  %field0 = extractvalue %dx.types.CBufRet.i32 %load, 0\n  ret void')
+        with self.assertRaisesRegex(ValueError, '锚点不唯一'):
+            relocate_material_reads(ir, OLD, NEW)
+
     # 自定义效果会直接用f32读取heap材质CB；扩容后参数不动、资源逐字段迁移。
     def test_float_cb_reads_preserve_parameters_and_relocate_tail(self):
         for register, lanes in [(59, range(4)), (60, range(4)), (65, range(4)), (66, [0])]:

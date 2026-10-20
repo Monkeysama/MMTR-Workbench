@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 from pathlib import Path
@@ -314,9 +315,8 @@ class Document:
         """返回含待导出 metadata 编辑的当前结构快照。"""
         if not self.metadata_edits:
             return self.info
-        data, _report = self.build()
-        _, info = inspect_data(data, self.source)
-        return info
+        self.build()
+        return self._build_cache[3]
 
     def interface_differences(self, index, data):
         self._index(index)
@@ -427,7 +427,7 @@ class Document:
         self.metadata_edits.append({'kind': 'remove_resource', 'resource_kind': kind,
                                     'record_index': record_index, 'name': name})
 
-    def validate_metadata_interfaces(self, dll: str | Path, *, _in_worker=False) -> dict:
+    def validate_metadata_interfaces(self, dll: str | Path, *, _in_worker=False, _reflections=None) -> dict:
         """用 DXC 反射核对待导出 metadata 与实际 DXIL 接口。
 
         该检查只读取当前文档和 Shader blob，不执行着色器；新增/删除接口
@@ -438,7 +438,13 @@ class Document:
                     'issues': [], 'metadata_edits': 0}
         if not _in_worker:
             from .material_process import run_material_task
-            return run_material_task(self, 'validate', dll)
+            key = self._validation_key(dll)
+            cached = getattr(self, '_validation_cache', None)
+            if cached is not None and cached[0] == key:
+                return copy.deepcopy(cached[1])
+            result = run_material_task(self, 'validate', dll)
+            self._validation_cache = (key, copy.deepcopy(result))
+            return result
         try:
             from .dxc import Dxc
             from inspect_mmtr import reflection
@@ -449,8 +455,14 @@ class Document:
             _, current = inspect_data(self.build()[0], self.source)
             reflections = {}
             for shader in current['shaders']:
-                reflections[shader['index']] = reflection(decoder.disassemble(
-                    self.shader_bytes(shader['index'])))
+                index = shader['index']
+                payload = self.shader_bytes(index)
+                cached = (_reflections or {}).get(index)
+                # 只复用当前隔离任务已解析且字节hash完全匹配的反射；变更后必须重新读取。
+                if cached is not None and cached[0] == hashlib.sha256(payload).digest():
+                    reflections[index] = cached[1]
+                else:
+                    reflections[index] = reflection(decoder.disassemble(payload))
         except Exception as exc:
             if isinstance(exc, EditError):
                 raise
@@ -518,10 +530,13 @@ class Document:
                         'actual_size': reflected['size'],
                     })
 
+        # 按元数据偏移建索引，避免每条记录重新遍历整张名称表。
+        indexes = {id(info): {kind: {entry['offset']: entry['name'] for entry in info['metadata'][kind]}
+                              for kind in ('srvs', 'samplers', 'uavs')} for info in (self.info, current)}
+
         def table_names(info: dict, record: dict, kind: str) -> set[str]:
-            offsets = set(record['metadata_tables'][kind])
-            return {entry['name'] for entry in info['metadata'][kind]
-                    if entry['offset'] in offsets}
+            names = indexes[id(info)][kind]
+            return {names[offset] for offset in record['metadata_tables'][kind]}
 
         kind_map = {'texture': 'srvs', 'sampler': 'samplers', 'UAV': 'uavs'}
         original_info = self.info
@@ -816,10 +831,35 @@ class Document:
             return (int(vector[1]) if vector[1] else 1) * 4 * count
         return None
 
+    # 值键覆盖全部可变编辑容器；不依赖调用方记得递增revision或手动清空缓存。
+    def _build_key(self):
+        return (self.original, str(self.source), tuple(sorted(self.replacements.items())),
+                tuple(sorted(self.renames.items())), tuple(sorted(self.redirects.items())),
+                json.dumps([self.metadata_edits, self.replacement_notes, self.integrity], sort_keys=True))
+
+    # 验证结论额外绑定DXC实际内容；更换DLL、替换Shader或改动证明都必须重新验证。
+    def _validation_key(self, dll):
+        path = Path(dll).resolve()
+        return self._build_key(), str(path), hashlib.sha256(path.read_bytes()).digest()
+
+    def remember_validation(self, dll, report):
+        self._validation_cache = (self._validation_key(dll), copy.deepcopy(report))
+
+    # 缓存只属于此文档，键覆盖全部编辑值；直接修改字典、回滚或切换源也不能复用旧候选。
+    # 候选仍由完整重建/重解析产生，报告副本不与缓存或事务的metadata共享可变对象。
     def build(self):
         if not self.dirty:
             return self.original, {'unchanged': True, 'sha256': self.info['sha256'],
                                    'size': len(self.original), 'changed_shaders': []}
+        key = self._build_key()
+        cached = getattr(self, '_build_cache', None)
+        if cached is None or cached[0] != key:
+            data, report, info = self._build_uncached()
+            cached = (key, data, copy.deepcopy(report), info)
+            self._build_cache = cached
+        return cached[1], copy.deepcopy(cached[2])
+
+    def _build_uncached(self):
         if self.integrity['name_hash_mismatches'] or self.integrity['shader_trailer_mismatches']:
             raise EditError('原文件 hash 与当前研究格式不符；仅允许未编辑的原样导出。')
         if self.metadata_edits and self.renames:
@@ -891,7 +931,7 @@ class Document:
                                   ['Unknown metadata preserved; only known shader references relocated.',
                                    'DXIL IR is not original HLSL. Resource tables are not regenerated.',
                                    'Internal DXBC checksum/DXIL validation is not implemented by the rebuilder.'])}
-        return rebuilt, report
+        return rebuilt, report, parsed
 
     def export(self, path):
         path = Path(path).resolve()
