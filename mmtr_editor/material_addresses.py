@@ -106,6 +106,8 @@ def relocate_material_reads(ir, old, new):
         raise ValueError('只接受16字节对齐的参数区末尾扩容。')
     reads = material_reads(ir)
     replacements, changes, strides = {}, [], {}
+    # 同一会话可连续追加纹理和参数；前一次生成的SSA仍在IR中，后续必须分配新名称。
+    used_names = set(re.findall(r'^\s*(%\w+)\s*=', ir, re.M))
     for read in reads:
         if read['kind'] == 'instance':
             stride = read['stride']
@@ -128,9 +130,15 @@ def relocate_material_reads(ir, old, new):
         if not wanted:
             continue
         groups = sorted({target // 16 for _, target in wanted.values()})
-        additions = []
+        additions, group_names = [], {}
         for reg in groups:
-            name = f'%mmtrReloc{read["ssa"][1:]}r{reg}'
+            stem = f'%mmtrReloc{read["ssa"][1:]}r{reg}'
+            name, suffix = stem, 0
+            while name in used_names or name + 'addr' in used_names:
+                suffix += 1
+                name = f'{stem}_{suffix}'
+            used_names.update((name, name + 'addr'))
+            group_names[reg] = name
             if read['kind'] == 'cb':
                 text = re.sub(r'i32 \d+\)$', f'i32 {reg})', read['text'])
             else:
@@ -144,7 +152,7 @@ def relocate_material_reads(ir, old, new):
             pattern = r'^  ' + re.escape(ssa) + r' = extractvalue (.*) ' + re.escape(read['ssa']) + r', [0-3](?:  ;.*)?$'
             match = re.search(pattern, ir, re.M)
             assert match
-            replacements[match[0]] = f'  {ssa} = extractvalue {match[1]} %mmtrReloc{read["ssa"][1:]}r{target//16}, {target%16//4}'
+            replacements[match[0]] = f'  {ssa} = extractvalue {match[1]} {group_names[target//16]}, {target%16//4}'
             changes.append({'ssa': ssa, 'kind': read['kind'], 'old_offset': ex['offset'], 'new_offset': target})
     for ssa, stride in strides.items():
         match = re.search(r'^  ' + re.escape(ssa) + r' = (.*)$', ir, re.M)

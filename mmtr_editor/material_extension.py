@@ -47,6 +47,49 @@ def reflection_container(template):
     return bytes(header) + struct.pack('<I', 36) + b'DXIL' + struct.pack('<I', len(stat)) + stat
 
 
+# 只在space0有限SRV尾部追加；其它space的有限/无界声明逐字保留，不参与寄存器分配。
+# 调用方持有本次独立IR候选；不能把无界数组类型复制成新增的单纹理类型。
+def append_texture_declaration(nodes, table, texture, node):
+    entries = re.findall(r'!(\d+)', nodes[table])
+    pattern = (r'!\{i32 (\d+), (.*?), !"[^"]*", i32 (\d+), i32 (\d+), '
+               r'i32 (-?\d+), i32 (\d+), i32 (\d+), (.*)\}')
+    parsed = [re.fullmatch(pattern, nodes[key]) for key in entries]
+    if not parsed or not all(parsed):
+        raise EditError('SRV声明结构无法识别，不能分配新增纹理寄存器。')
+    identities, ranges, scalar_textures = set(), [], []
+    for row in parsed:
+        identity, space, start, count = (int(row[i]) for i in (1, 3, 4, 5))
+        if identity in identities or identity > 0xffffffff or space > 0xffffffff or start > 0xffffffff:
+            raise EditError('SRV身份或寄存器范围无效。')
+        identities.add(identity)
+        # LLVM可能把UINT_MAX数量显示为有符号-1；0及其它负数没有已验证语义。
+        unbounded = count in (-1, 0xffffffff)
+        if not unbounded and (count <= 0 or count > 0xffffffff or start + count > 0x100000000):
+            raise EditError('SRV数量或寄存器范围无效。')
+        if space != 0:
+            continue
+        if unbounded:
+            raise EditError('space0包含无界SRV，不能证明新增纹理的有限寄存器范围。')
+        ranges.append((start, start + count))
+        if (count == 1 and row[6] == '2'
+                and re.fullmatch(r'%"class\.Texture2D<vector<float, 4> >"\* undef', row[2])):
+            scalar_textures.append(row)
+    if not ranges or not scalar_textures:
+        raise EditError('缺少space0中已识别的单个float4 Texture2D声明模板。')
+    ordered = sorted(ranges)
+    if any(left[1] > right[0] for left, right in zip(ordered, ordered[1:])):
+        raise EditError('space0的SRV寄存器范围重叠。')
+    register = max(end for _, end in ranges)
+    identity = max(identities) + 1
+    if register > 0xffff or identity > 0xffffffff:
+        raise EditError('新增纹理寄存器或资源身份超出绑定表范围。')
+    sample = scalar_textures[0]
+    added = node(f'!{{i32 {identity}, {sample[2]}, !"{texture}", i32 0, i32 {register}, '
+                 f'i32 1, i32 2, i32 0, {sample[8]}}}')
+    nodes[table] = nodes[table][:-1] + f', !{added}}}'
+    return register
+
+
 # 修改声明、类型注解和资源尺寸，不向渲染算式加入新增字段的消费者。
 def patch_declarations(ir, old_size, new_size, parameter=None, texture=None):
     nodes = dict(re.findall(r'^!(\d+) = (.*)$', ir, re.M))
@@ -95,21 +138,7 @@ def patch_declarations(ir, old_size, new_size, parameter=None, texture=None):
         srv = re.match(r'!\{!(\d+),', nodes[root[1]]) if root else None
         if not srv:
             raise EditError('Shader没有可扩展的SRV声明表。')
-        entries = re.findall(r'!(\d+)', nodes[srv[1]])
-        pattern = r'!\{i32 (\d+), (.*?), !"[^"]*", i32 (\d+), i32 (\d+), i32 (\d+), i32 (\d+), i32 (\d+), (.*)\}'
-        parsed = [re.fullmatch(pattern, nodes[key]) for key in entries]
-        if not parsed or not all(parsed) or any(int(m[3]) != 0 or int(m[5]) == 0 for m in parsed):
-            raise EditError('只支持space0中有限范围的现有SRV声明。')
-        register = max(int(m[4])+int(m[5]) for m in parsed)
-        if register > 0xffff:
-            raise EditError('新增纹理寄存器超出绑定表范围。')
-        sample = next((m for m in parsed if 'class.Texture2D<vector<float, 4> >' in m[2] and m[6] == '2'), None)
-        if sample is None:
-            raise EditError('缺少已识别的float4 Texture2D声明模板。')
-        identity = max(int(m[1]) for m in parsed)+1
-        added = node(f'!{{i32 {identity}, {sample[2]}, !"{texture}", i32 0, i32 {register}, '
-                     f'i32 1, i32 2, i32 0, {sample[8]}}}')
-        nodes[srv[1]] = nodes[srv[1]][:-1]+f', !{added}}}'
+        register = append_texture_declaration(nodes, srv[1], texture, node)
     ir = re.sub(r'^!(\d+) = (.*)$', lambda m: f'!{m[1]} = {nodes[m[1]]}', ir, flags=re.M)
     return ir+'\n'+'\n'.join(extra)+'\n', register
 

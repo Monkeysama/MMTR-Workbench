@@ -103,6 +103,8 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 自动参数/纹理新增沿用 Workbench 的有界迁移：关联 MDF 证明布局，参数仅支持 UserMaterial 尾部 4/8/12/16 字节，纹理仅支持已识别 PS 表中的 float4 Texture2D；原生 DXC 在独立进程运行。不能确认的寻址、多个关联材质布局不一致、新阶段/空表等会整体拒绝。`sync_mdf=false` 只跳过向所选 MDF 加字段，仍需打开关联 MDF 证明原布局。
 
+PS声明可以混有其它space的有限或无界SRV数组：这些声明保留原样，新增单个Texture2D只在space0有限范围末尾分配。space0本身无界、范围重叠或没有单纹理模板时仍拒绝。记录仍应选择包含MDF材质纹理名的PS表；仅有引擎资源的堆句柄绘制记录不能直接作为record_index。扩展器会同时检查并迁移已识别的堆材质纹理/GPBF读取，新增槽本身不自动被原Shader采样。连续新增会为每轮地址迁移分配独立临时变量名，可先加纹理再加参数。
+
 同一 MMTR 的其它材质使用者也必须匹配新布局。服务不会自动补齐全部使用者或改变 master；独立材质实验可用 `workbench_set_master` 显式设置独立 master，再打开与路径匹配的 MMTR。仅改输出文件名不等于 MDF 已改用该文件。
 
 删除 MDF 字段不代表删除 MMTR Shader 接口；Sampler/UAV 和真正 MMTR 接口删除不提供自动迁移。手动 rename、expert 替换等仍受既有核心边界限制，不等于可运行布局已成立。`validate` 证明本次静态接口契约，不能替代 GPU 或游戏画面验收。

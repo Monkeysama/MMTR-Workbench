@@ -33,6 +33,30 @@ def marked_bytes(layout):
 
 
 class MaterialAddressesTests(unittest.TestCase):
+    def test_texture_then_parameter_extension_allocates_distinct_ssa_names(self):
+        old = MaterialTailLayout(944, tuple(f'tex{i}' for i in range(21)), ('gp0', 'gp1', 'gp2'))
+        middle = MaterialTailLayout(944, old.texture_names + ('newTex',), old.gpbf_names)
+        final = MaterialTailLayout(960, middle.texture_names, old.gpbf_names)
+        raw = '''define void @main() {
+  %raw = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 0, i32 0, i32 0, i1 false)
+  %base = lshr i32 %material, 4
+  %addr = add i32 %base, 64
+  %load = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %raw, i32 %addr, i32 0, i8 15, i32 4)
+''' + ''.join(f'  %field{lane} = extractvalue %dx.types.ResRet.i32 %load, {lane}\n' for lane in range(4)) + '''  ret void
+}
+; BindlessBuffer texture byte r/o T0 t0 1
+'''
+        for original in (cb_ir(64, range(4)), raw):
+            with self.subTest(kind='raw' if original == raw else 'cb'):
+                first, _ = relocate_material_reads(original, old, middle)
+                actual, _ = relocate_material_reads(first, middle, final)
+                names = re.findall(r'^\s*(%\w+)\s*=', actual, re.M)
+                self.assertEqual(len(names), len(set(names)))
+                after = {ex['ssa']: ex['offset'] for r in material_reads(actual) for ex in r['extracts']}
+                for lane in range(4):
+                    expected = old.offset_in(1024 + lane * 4, final)
+                    self.assertEqual(after[f'%field{lane}'], expected)
+
     def test_texture_gpbf_boundary_reads_preserve_identity(self):
         old_mem, new_mem = marked_bytes(OLD), marked_bytes(NEW)
         for register, lanes in [(59, range(4)), (60, range(4)), (65, range(4)), (66, [0])]:
