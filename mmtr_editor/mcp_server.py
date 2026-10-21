@@ -207,7 +207,7 @@ def create_server(session=None):
         '独立的 MMTR/MDF 编辑会话，不共享桌面窗口。先 open，再 list/inspect；所有索引从0开始。'
         'Shader 文本分页读取。自动新增参数/Texture2D 必须同时打开关联 MDF 并设置 DXC；'
         '沿用 Workbench 的布局迁移和接口验证。编辑保存在内存，export 必须另存，不能覆盖源文件。'
-        '同一 master 的其它使用者也需匹配新布局。MMTR 接口删除/Sampler/UAV 不支持自动迁移。'
+        '同一 master 的其它使用者也需匹配新布局。MMTR 删除仅支持消费者证明完整的参数/Texture2D；Sampler/UAV 不支持自动迁移。'
         '使用 set_master 显式修改指定材质的MMTR相对路径；不自动改其它材质或安装游戏。工具错误可修正后重试。'))
 
     def tool(*, write=False, transaction=False, files=False, destructive=False, job=False, job_write=False):
