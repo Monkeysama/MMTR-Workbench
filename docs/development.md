@@ -44,4 +44,6 @@ python scripts/package_editor.py
 
 ## 证据边界
 
+REasy 优化 P0–P5 的改动、验证和未验收范围汇总见[优化记录](reasy-optimization-record.md)。P6 已按用户决定暂停。
+
 单元测试、类型检查、DXC验证、桌面构建及游戏效果是不同层级。记录输入身份、命令、退出码、跳过项与限制。首次独立迁移记录见[migration.md](migration.md)，无需复用研究仓库的DLL议题或GPU流水。

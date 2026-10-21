@@ -94,7 +94,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 `workbench_project_save` 接受 `path`、相同的 `actions/record_index/variant` 和可选 `overwrite`，文件以 `.mmtrproj.json` 结尾。工程保存 schema、源及 DXC 内容指纹、材质身份、动作/默认值和目标；不保存资产、IR、旧偏移或可执行计划。源必须已另存且可从磁盘重开，有未保存编辑时应先另存并打开新源。
 
-重开相同 MMTR/MDF 并选择相同材质、配置 DXC 后，`workbench_project_read({"path":"D:/Mod/material.mmtrproj.json"})` 返回 `project.request`、`changed_inputs` 和 `requires_replan=true`；它不自动打开引用或执行工程。恢复意图后重新 preview/submit，不能复用旧 digest。见[设计与验证](material-variants.md)。
+重开相同 MMTR/MDF 并选择相同材质、配置 DXC 后，`workbench_project_read({"path":"D:/Mod/material.mmtrproj.json"})` 返回 `project.request`、`changed_inputs` 和 `requires_replan=true`；它不自动打开引用或执行工程。恢复意图后重新 preview/submit，不能复用旧 digest。
 
 ### 只读结构预检
 
@@ -116,7 +116,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`structure_diagnostics`|分页诊断，包含严重度、代码、Program、绝对字段偏移|
 |`structure_unmodeled_ranges`|分页列出前缀中尚未解释的区段；包含字符串和 padding，不意味着这些字节可以删除|
 
-这里使用 `items/total/offset/next_offset` 分页格式，嵌套绑定、成员及使用者也分页。所有偏移、Program/对象索引属于返回 SHA256 对应的当前候选；编辑后应重新查询。状态 cache key 的算法为 `opaque`，未知资源类型保留原值并给出诊断。结构模型和限制详见[结构检查](structure-inspection.md)。
+这里使用 `items/total/offset/next_offset` 分页格式，嵌套绑定、成员及使用者也分页。所有偏移、Program/对象索引属于返回 SHA256 对应的当前候选；编辑后应重新查询。状态 cache key 的算法为 `opaque`，未知资源类型保留原值并给出诊断。
 
 ### 后台混合追加
 
@@ -137,7 +137,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 取消只回收候选 worker，不改当前文档或写入文件。cancel 返回 cancelling 后继续查询，直到 cancelled；若提交先完成则返回 succeeded。Windows worker 归属于 kill-on-close Job Object，冻结入口另监视 onefile 启动器，外层被终止时也结束内层核心。旧单项 MCP 工具仍兼容同步调用。桌面“参数与资源”的批量图标、参数/SRV 新增入口共用该后台任务服务。
 
-P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取消不变、过期拒绝、混合成功、运行中及成功后请求重试、成功后取消仍返回成功；状态查询最大延时分别为0.282/0.344秒，不能作为其它机器的耗时保证。Windows onefile 外层强制结束的进程树回收另行通过。桌面构建中的自有 HLSL 混合批次通过并自动定位新增参数，源码桌面使用 Stocking 验证进度与取消。均未进行游戏验证或自动安装；证据和局限见[后台材质任务](material-jobs.md)。
+P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取消不变、过期拒绝、混合成功、运行中及成功后请求重试、成功后取消仍返回成功；状态查询最大延时分别为0.282/0.344秒，不能作为其它机器的耗时保证。Windows onefile 外层强制结束的进程树回收另行通过。桌面构建中的自有 HLSL 混合批次通过并自动定位新增参数，源码桌面使用 Stocking 验证进度与取消。均未进行游戏验证或自动安装。
 
 ## 调用示例
 
@@ -207,7 +207,7 @@ PS声明可以混有其它space的有限或无界SRV数组：这些声明保留�
 
 此工具对应优化计划 P5 的消费者证明，预检返回的 `coverage.scope=bounded_dxil_consumers` 和 `coverage.deletion_supported=false` 明确表示它仍是只读证明；只有 `workbench_removal_submit` 的执行报告才会在完整候选验证成功后标记 `deletion_supported=true`。两者都不证明实际运行分支、所有外部使用者或游戏效果。报告不包含 IR，未知/间接访问仍拒绝。
 
-`workbench_removal_preview` 在已知全部关联材质布局一致时启动只读后台任务。输入 `actions=[{"action":"parameter","name":"UnusedP"},{"action":"texture","name":"UnusedMap"}]`、非空 `request_key` 和可选 `material_index`；`workbench_removal_submit` 使用预览返回的 `plan_digest` 和新的请求键提交候选。两者查询/取消复用现有材质任务接口。结果 `eligible=true` 才能进入删除执行；已用、仅读取描述符、未知访问、句柄逃逸、跨函数调用和 MMTRS 阻止资格。执行器同步声明、STAT、绑定表、计数和已知 MDF，并在失败时不更新当前会话。独立变体可传既有变体目标，提交后仍需显式导出。逐 Shader 身份、失败与最终收缩布局见分页结果；边界见[删除边界](material-removal.md)。
+`workbench_removal_preview` 在已知全部关联材质布局一致时启动只读后台任务。输入 `actions=[{"action":"parameter","name":"UnusedP"},{"action":"texture","name":"UnusedMap"}]`、非空 `request_key` 和可选 `material_index`；`workbench_removal_submit` 使用预览返回的 `plan_digest` 和新的请求键提交候选。两者查询/取消复用现有材质任务接口。结果 `eligible=true` 才能进入删除执行；已用、仅读取描述符、未知访问、句柄逃逸、跨函数调用和 MMTRS 阻止资格。执行器同步声明、STAT、绑定表、计数和已知 MDF，并在失败时不更新当前会话。独立变体可传既有变体目标，提交后仍需显式导出。逐 Shader 身份、失败与最终收缩布局见分页结果。
 
 `workbench_effect_template(name="emission_multiplier")` 返回封闭的 P6 合同：新增 `MMTR_EmissionStrength` 和 `MMTR_EmissionMap`，输入是原像素输出与这两个接口，输出是最终像素输出。`workbench_effect_preview` 将同一动作送入批量最终布局计划；调用方必须提供显式读取并保留原受光/透明分支的 Shader，再通过批量接口编译验证。状态编辑、任意节点图和 GPU 预览仍未开放。
 
