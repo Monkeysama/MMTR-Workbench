@@ -19,7 +19,8 @@ class RpcWorkspaceTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        self.root = Path(self.folder.name)
+        # Windows runner 的 TEMP 可能使用 8.3 短路径，与核心返回的规范路径保持一致。
+        self.root = Path(self.folder.name).resolve()
         self.session = RpcSession()
         self.addCleanup(self.session.close)
         for name in ('a', 'b'):

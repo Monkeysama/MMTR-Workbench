@@ -15,12 +15,19 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from test_mdf_editing import fixture
 from mmtr_editor import __version__
+from mmtr_editor.mcp_server import WorkbenchSession, create_server
 
 
 # 每个编辑/导出操作经过协议，错误反例验证服务端整批回滚；临时文件归本进程所有。
 async def verify(executable, dxc=None):
     command = str(Path(executable).resolve()) if executable else sys.executable
     arguments = ['--mcp'] if executable else [str(ROOT / 'scripts' / 'run_mcp.py')]
+    # 按当前源码契约核对完整工具清单，避免工具增加后固定数量误报或冻结包遗漏工具。
+    state = WorkbenchSession()
+    try:
+        expected_tools = {tool.name for tool in await create_server(state).list_tools()}
+    finally:
+        state.close()
     with tempfile.TemporaryDirectory(prefix='mmtr-standalone-') as folder:
         work = Path(folder)
         source = work / 'source.mdf2.45'
@@ -32,7 +39,11 @@ async def verify(executable, dxc=None):
                 initialized = await client.initialize()
                 tools = await client.list_tools()
                 assert initialized.server_info.version == __version__
-                assert len(tools.tools) == 20
+                actual_tools = {tool.name for tool in tools.tools}
+                assert len(actual_tools) == len(tools.tools), 'MCP 工具名称重复'
+                assert actual_tools == expected_tools, (
+                    f'MCP 工具清单不一致：缺少 {sorted(expected_tools - actual_tools)}；'
+                    f'多出 {sorted(actual_tools - expected_tools)}')
 
                 async def call(name, **args):
                     result = await client.call_tool('workbench_' + name, args)
@@ -68,7 +79,7 @@ async def verify(executable, dxc=None):
                 other = await call('inspect', kind='material', index=1)
                 assert other['master'] == 'MaterialShader/test.mmtr'
                 assert source.read_bytes() == original
-    return {'passed': True, 'tools': 20, 'version': __version__, 'command': command,
+    return {'passed': True, 'tools': len(actual_tools), 'version': __version__, 'command': command,
             'temporary_cwd': True, 'synthetic_input_only': True, 'game_tested': False, 'native_compile_checked': bool(dxc),
             'executable_sha256': hashlib.sha256(Path(executable).read_bytes()).hexdigest() if executable else None}
 

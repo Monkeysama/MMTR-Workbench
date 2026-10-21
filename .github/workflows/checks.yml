@@ -33,6 +33,7 @@ jobs:
       - run: npm ci
       - run: npm run test:core
       - run: npm run test:mcp
+      - run: python scripts/smoke_workbench_standalone.py
       - run: npm run test:frontend
       - run: npm run build
   desktop:

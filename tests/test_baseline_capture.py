@@ -15,7 +15,7 @@ class BaselineCaptureTests(unittest.TestCase):
     # 输入被替换时必须在解析和创建输出前失败，不能自动采信新的 hash。
     def test_changed_input_rejected_before_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             source = root / 'input'
             source.write_bytes(b'changed')
             entry = {'path': 'input', 'sha256': digest(b'original')}
@@ -29,7 +29,7 @@ class BaselineCaptureTests(unittest.TestCase):
 
     def test_missing_optional_is_reported_and_not_passed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             manifest = root / 'manifest.json'
             manifest.write_text(json.dumps({'schema': 1, 'samples': [{'id': 'missing', 'optional': True,
                 'mmtr': {'path': 'absent', 'sha256': '0' * 64}}]}))
@@ -39,7 +39,7 @@ class BaselineCaptureTests(unittest.TestCase):
 
     def test_path_traversal_sample_id_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             manifest = root / 'manifest.json'
             manifest.write_text(json.dumps({'schema': 1, 'samples': [{'id': '../escape'}]}))
             with self.assertRaisesRegex(ValueError, 'id'):
@@ -47,7 +47,7 @@ class BaselineCaptureTests(unittest.TestCase):
 
     def test_protected_input_and_existing_output_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / 'input').write_bytes(b'fixed')
             manifest = root / 'manifest.json'
             manifest.write_text(json.dumps({'schema': 1, 'samples': [{'id': 'a',
@@ -64,7 +64,7 @@ class BaselineCaptureTests(unittest.TestCase):
 
     def test_failed_parse_records_failed_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / 'input').write_bytes(b'fixed')
             manifest = root / 'manifest.json'
             manifest.write_text(json.dumps({'schema': 1, 'samples': [{'id': 'a',
