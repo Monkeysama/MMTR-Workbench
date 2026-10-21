@@ -202,6 +202,43 @@ float4 main(float4 position: SV_Position) : SV_Target {
     def apply(self, service, actions):
         return service.handle({'op': 'material_apply', 'actions': actions, 'record_index': 0, 'dll': str(NATIVE_DXC)})
 
+    def test_background_rpc_mixed_batch_runs_in_owned_process_and_commits_once(self):
+        import time
+        from mmtr_editor.rpc import RpcSession
+        from mmtr_editor.material_jobs import TERMINAL
+        session = RpcSession()
+        self.addCleanup(session.close)
+        session.service = self.service()
+        actions = [{'action': 'parameter', 'name': 'AsyncP', 'byte_size': 8, 'values': [1.0, 2.0]},
+                   {'action': 'texture', 'name': 'AsyncMap'}]
+        request = dict(actions=actions, record_index=0, dll=str(NATIVE_DXC))
+        plan = session.handle(dict(op='material_job_preview', **request))
+        revision = session.revision
+        job = session.handle(dict(op='material_job_submit', **request,
+                                  expected_plan=plan['digest'], request_key='native'))
+        deadline = time.monotonic()+15
+        while time.monotonic() < deadline:
+            status = session.handle(dict(op='material_job_status', job_id=job['job_id']))
+            if status['state'] in TERMINAL:
+                break
+            time.sleep(.01)
+        self.assertEqual(status['state'], 'succeeded', status)
+        self.assertIsNotNone(status['worker_pid'])
+        self.assertEqual(session.revision, revision+1)
+        retry = session.handle(dict(op='material_job_submit', **request,
+                                    expected_plan=plan['digest'], request_key='native'))
+        self.assertEqual(retry['job_id'], job['job_id'])
+        self.assertEqual(session.revision, revision+1)
+        result = session.handle(dict(op='material_job_result', job_id=job['job_id'], limit=1))
+        self.assertEqual(result['result']['interface_sync']['shader_reports_total'], 2)
+        doc = Document(session.service.doc.build()[0], session.service.doc.source)
+        self.assertFalse(doc.integrity['shader_trailer_mismatches'])
+        mdf = MdfDocument(session.service.mdf.build()[0])
+        for material in mdf.materials:
+            self.assertEqual(material['properties'][-1]['name'], 'AsyncP')
+            self.assertEqual(material['properties'][-1]['values'], [1.0, 2.0])
+            self.assertEqual(material['textures'][-1]['name'], 'AsyncMap')
+
     def test_all_widths_and_two_textures_compile_once_per_distinct_payload(self):
         service = self.service()
         original = MdfDocument(service.mdf.build()[0])

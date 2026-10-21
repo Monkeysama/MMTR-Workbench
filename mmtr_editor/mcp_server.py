@@ -1,6 +1,7 @@
 """Workbench 的标准 stdio MCP 入口；每个进程拥有独立文档，stdout 仅用于协议。"""
 from copy import deepcopy
 from functools import wraps
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
@@ -86,6 +87,27 @@ Action = Annotated[PropertyAction | ComponentsAction | DeletePropertyAction | Te
                    Field(discriminator='action')]
 
 
+class ParameterAddition(BaseModel):
+    """批量追加支持 float1..4；默认值数量由共享计划核心再次校验。"""
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['parameter']
+    name: Name
+    byte_size: Literal[4, 8, 12, 16]
+    values: Annotated[list[FiniteFloat], Field(min_length=1, max_length=4)] | None = None
+
+
+class TextureAddition(BaseModel):
+    """Texture2D 无消费者槽；默认使用系统 NullBlack。"""
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['texture']
+    name: Name
+    path: Annotated[str, Field(min_length=1, max_length=32767)] = 'systems/rendering/NullBlack.tex'
+
+
+MaterialAction = Annotated[ParameterAddition | TextureAddition, Field(discriminator='action')]
+MaterialActions = Annotated[list[MaterialAction], Field(min_length=1, max_length=100)]
+
+
 # 所有 SDK 工作线程串行访问同一 Service；锁不交给 deepcopy，事务失败恢复整个文档状态。
 class WorkbenchSession:
     def __init__(self):
@@ -98,6 +120,16 @@ class WorkbenchSession:
         self.snapshot_cache = None
         # 读取统计按 MMTR/MDF/DXC 当前内容缓存一份，不能把原路径被替换的 DLL 当成同一个输入。
         self.usage_cache = None
+        from .material_jobs import MaterialJobs
+        self.jobs = MaterialJobs(self)
+
+    def invalidate(self):
+        self.snapshot_cache = None
+        self.text_cache.clear()
+        self.usage_cache = None
+
+    def close(self):
+        self.jobs.close()
 
     def require_doc(self):
         if self.service.doc is None:
@@ -128,7 +160,7 @@ class WorkbenchSession:
                   'session': 'independent_process', 'transport': 'stdio',
                   'capabilities': ['paged_queries', 'shader_compile_replace', 'mdf_batch_edit',
                                    'auto_parameter_texture_extension', 'mdf_master_edit', 'validated_export',
-                                   'readonly_structure', 'material_input_usage'],
+                                   'readonly_structure', 'material_input_usage', 'material_batch_jobs'],
                   'mmtr': None, 'mdf': None, 'compiled_size': len(service.compiled or b'')}
         if service.doc:
             doc = service.doc
@@ -158,19 +190,18 @@ def create_server(session=None):
         '同一 master 的其它使用者也需匹配新布局。MMTR 接口删除/Sampler/UAV 不支持自动迁移。'
         '使用 set_master 显式修改指定材质的MMTR相对路径；不自动改其它材质或安装游戏。工具错误可修正后重试。'))
 
-    def tool(*, write=False, transaction=False, files=False, destructive=False):
+    def tool(*, write=False, transaction=False, files=False, destructive=False, job=False, job_write=False):
         def decorate(function):
             @wraps(function)
             def invoke(*args, **kwargs):
-                with state.lock:
+                with nullcontext() if job else state.lock:
                     backup = deepcopy(state.service) if transaction else None
                     saved = state.saved_mmtr
                     try:
                         result = function(*args, **kwargs)
                         if write:
                             state.revision += 1
-                            state.snapshot_cache = None
-                            state.text_cache.clear()
+                            state.invalidate()
                             if isinstance(result, dict):
                                 result['revision'] = state.revision
                                 if isinstance(result.get('status'), dict):
@@ -180,13 +211,41 @@ def create_server(session=None):
                         if backup is not None:
                             state.service = backup
                             state.saved_mmtr = saved
-                        state.snapshot_cache = None
-                        state.text_cache.clear()
+                        if not job:
+                            state.invalidate()
                         raise ToolError(str(exc)) from exc
             return server.tool(annotations=ToolAnnotations(
-                read_only_hint=not write and not files, destructive_hint=destructive,
+                read_only_hint=not write and not files and not job_write, destructive_hint=destructive,
                 open_world_hint=files))(invoke)
         return decorate
+
+    @tool(job=True)
+    def workbench_material_preview(actions: MaterialActions, record_index: Index | None = None) -> dict[str, Any]:
+        """预览混合参数/贴图批次及关联材质；不编译。提交时使用返回的 digest。"""
+        return state.jobs.preview([a.model_dump(exclude_none=True) for a in actions], record_index)
+
+    @tool(job=True, job_write=True)
+    def workbench_material_submit(actions: MaterialActions, expected_plan: str,
+                                  request_key: Annotated[str, Field(min_length=1, max_length=128)],
+                                  record_index: Index | None = None) -> dict[str, Any]:
+        """短调用提交后台批次；超时重试必须沿用相同 request_key、动作及计划，防止重复新增。"""
+        return state.jobs.submit([a.model_dump(exclude_none=True) for a in actions], record_index,
+                                  expected_plan, request_key)
+
+    @tool(job=True)
+    def workbench_material_status(job_id: str) -> dict[str, Any]:
+        """查询后台阶段/数量/错误；计算期间也可调用，不构建或锁住文档。"""
+        return state.jobs.status(job_id)
+
+    @tool(job=True, job_write=True)
+    def workbench_material_cancel(job_id: str) -> dict[str, Any]:
+        """取消本会话候选并回收其 DXC 进程；已成功提交的任务仍返回 succeeded。"""
+        return state.jobs.cancel(job_id)
+
+    @tool(job=True)
+    def workbench_material_result(job_id: str, offset: Index = 0, limit: Limit = 40) -> dict[str, Any]:
+        """分页读取成功批次的验证结果；Shader 报告分页，文档二进制不会返回。"""
+        return state.jobs.result(job_id, offset, limit)
 
     @tool()
     def workbench_status() -> dict[str, Any]:
@@ -606,7 +665,11 @@ def file_result(path, data):
 def main():
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
-    create_server().run(transport='stdio')
+    state = WorkbenchSession()
+    try:
+        create_server(state).run(transport='stdio')
+    finally:
+        state.close()
 
 
 if __name__ == '__main__':

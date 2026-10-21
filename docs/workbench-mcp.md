@@ -47,6 +47,11 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_rename`|在既有字符串容量内改名，保持共享名称 hash|
 |`workbench_add_parameter`|自动新增尾部 UserMaterial 参数和关联 MDF 参数|
 |`workbench_add_texture`|自动新增已有 PS 表中的 Texture2D 和关联 MDF 槽位|
+|`workbench_material_preview`|预览一次混合追加的最终布局、关联材质和计划摘要|
+|`workbench_material_submit`|使用计划摘要和请求键提交后台批次，返回 job_id|
+|`workbench_material_status`|查询任务状态、阶段、数量和错误，不重建文档|
+|`workbench_material_cancel`|取消未提交候选并回收本任务的 DXC 子进程|
+|`workbench_material_result`|分页读取成功批次的验证和 Shader 修改报告|
 |`workbench_set_master`|显式修改指定材质的 MMTR 相对路径，只影响该材质|
 |`workbench_edit_mdf`|一个事务内批量修改、增删 MDF 参数/纹理及修改设置/标记|
 |`workbench_validate`|DXIL/metadata/材质布局验证，分页返回问题|
@@ -76,6 +81,25 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`structure_unmodeled_ranges`|分页列出前缀中尚未解释的区段；包含字符串和 padding，不意味着这些字节可以删除|
 
 这里使用 `items/total/offset/next_offset` 分页格式，嵌套绑定、成员及使用者也分页。所有偏移、Program/对象索引属于返回 SHA256 对应的当前候选；编辑后应重新查询。状态 cache key 的算法为 `opaque`，未知资源类型保留原值并给出诊断。结构模型和限制详见[结构检查](structure-inspection.md)。
+
+### 后台混合追加
+
+长任务优先使用后台接口。先打开 MMTR/关联 MDF、选择关联材质并配置 DXC，再调用 `workbench_material_preview`：
+
+```json
+{"actions":[
+  {"action":"parameter","name":"ExtraParam","byte_size":8,"values":[0,0]},
+  {"action":"texture","name":"ExtraMap","path":"systems/rendering/NullBlack.tex"}
+],"record_index":130}
+```
+
+示例 record_index 必须替换成当前文档实际的 PS 绘制记录。预览不运行深度 Shader 编译；仍可能在执行中因未知寻址而失败。保存返回的 digest，以相同 actions/record_index 调用 `workbench_material_submit`，另加 `expected_plan=digest` 和唯一 `request_key`。
+
+提交返回 job_id，随后用 `workbench_material_status` 查询。状态为 queued、running、cancelling、succeeded、failed、cancelled 或 stale；stage、completed/total 表示当前阶段进度，不是全任务 ETA。成功后调用 `workbench_material_result`，Shader 报告用 offset/limit 分页。文档只在全部验证完成后提交一次，导出仍需显式调用原有 export。
+
+同会话只运行一个修改任务。重试必须使用原 request_key、动作和摘要，包括已经完成的任务；同键不同请求会拒绝。会话最多保留128个任务，不淘汰幂等键，重启后不恢复。读取返回已提交状态；期间发生编辑、材质切换或 DXC 改变，会拒绝过期候选，保留较新的编辑。
+
+取消只回收候选 worker，不改当前文档或写入文件。cancel 返回 cancelling 后继续查询，直到 cancelled；若提交先完成则返回 succeeded。Windows worker 归属于 kill-on-close Job Object，父进程异常退出也会回收。旧单项工具仍兼容同步调用；本检查点尚未接入桌面批量表单，冻结进程和桌面交互需后续独立验收。
 
 ## 调用示例
 

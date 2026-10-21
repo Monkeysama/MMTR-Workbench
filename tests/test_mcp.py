@@ -30,6 +30,7 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.source = self.root / '原始.mdf2.45'
         self.source.write_bytes(fixture())
         self.state = WorkbenchSession()
+        self.addCleanup(self.state.close)
         self.server = create_server(self.state)
         await self.call('open', mdf_path=str(self.source))
 
@@ -39,9 +40,13 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 21)
+        self.assertEqual(len(tools), 26)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_material_status'].annotations.read_only_hint)
+        self.assertFalse(tools['workbench_material_submit'].annotations.read_only_hint)
+        self.assertFalse(tools['workbench_material_cancel'].annotations.read_only_hint)
+        self.assertIn('discriminator', tools['workbench_material_preview'].input_schema['properties']['actions']['items'])
         self.assertFalse(tools['workbench_export'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_reset'].annotations.destructive_hint)
         self.assertTrue(tools['workbench_export'].annotations.open_world_hint)
@@ -50,6 +55,48 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
         self.assertEqual(tools['workbench_redirect'].input_schema['properties']['field']['type'], 'integer')
+
+    async def test_material_jobs_short_calls_and_error_leave_revision_unchanged(self):
+        from threading import Event
+        from mmtr_editor.model import Document
+        dll = self.root/'job.dll'
+        dll.write_bytes(b'not loaded; identity only')
+        self.state.dll = str(dll)
+        self.state.service.doc = Document(mmtr_fixture(), Path('MaterialShader/test.mmtr.240906211'))
+        self.state.service.mdf_selected = 0
+        actions = [{'action': 'parameter', 'name': 'AsyncP', 'byte_size': 4},
+                   {'action': 'texture', 'name': 'AsyncMap'}]
+        entered, release = Event(), Event()
+        self.addCleanup(release.set)
+        revision = self.state.revision
+
+        def compute(*args, worker_control, **kwargs):
+            worker_control.progress(stage='shaders', completed=1, total=5)
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError('test gate timed out')
+            worker_control.check()
+            raise RuntimeError('injected native rejection')
+
+        plan = await self.call('material_preview', actions=actions, record_index=0)
+        with patch('mmtr_editor.material_jobs.apply_material_batch', side_effect=compute):
+            job = await self.call('material_submit', actions=actions, record_index=0,
+                                  expected_plan=plan['digest'], request_key='sdk-retry')
+            self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+            status = await self.call('material_status', job_id=job['job_id'])
+            self.assertEqual((status['stage'], status['completed']), ('shaders', 1))
+            duplicate = await self.call('material_submit', actions=actions, record_index=0,
+                                        expected_plan=plan['digest'], request_key='sdk-retry')
+            self.assertEqual(job['job_id'], duplicate['job_id'])
+            with self.assertRaises(ToolError):
+                await self.call('material_result', job_id=job['job_id'])
+            self.assertEqual(self.state.revision, revision)
+            await self.call('material_cancel', job_id=job['job_id'])
+            release.set()
+            await asyncio.to_thread(self.state.close)
+            status = await self.call('material_status', job_id=job['job_id'])
+            self.assertEqual(status['state'], 'cancelled')
+            self.assertEqual(self.state.revision, revision)
 
     # 读取统计只读：缺 MMTR 时拒绝；同一字节状态复用缓存，筛选与分页在缓存结果上进行。
     async def test_usage_requires_mmtr_caches_and_filters(self):

@@ -312,7 +312,7 @@ def texture_tables(document, layout, record_index):
 
 # 旧单项入口只包装一个计划动作，与批量共用一次迁移/编译路径。
 def extend_material_interface(document, material, dll, *, parameter=None, texture=None, record_index=None,
-                              actions=None, plan_context=None, expected_plan=None):
+                              actions=None, plan_context=None, expected_plan=None, progress=None):
     from .dxil_assembly import DxilAssembly
     from .material_plan import plan_material_edit, dll_identity
     if actions is None:
@@ -323,6 +323,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     elif parameter or texture:
         raise EditError('批量动作不能与旧单项参数混用。')
     started = time.perf_counter()
+    progress = progress or (lambda *args: None)
+    progress('planning', 0, 0)
     plan = plan_material_edit(document, material, dll, actions, record_index, **(plan_context or {}))
     if expected_plan is not None and plan.digest != expected_plan:
         raise EditError('计划身份已改变，必须重新规划。')
@@ -371,7 +373,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     cache, cache_bytes = OrderedDict(), 0
     compiler = DxilAssembly(dll)
     try:
-        for shader in info['shaders']:
+        for position, shader in enumerate(info['shaders']):
+            progress('shaders', position, len(info['shaders']))
             index = shader['index']
             original = document.shader_bytes(index)
             has_texture = index in texture_shaders
@@ -459,6 +462,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                 cache_bytes -= len(row[0])
     finally:
         compiler.close()
+    progress('shaders', len(info['shaders']), len(info['shaders']))
+    progress('building', 0, 1)
     tick = time.perf_counter()
     operation = dict(kind='extend_material_interface', parameter=parameter, texture=texture,
                      parameters=parameters, textures_added=textures, new_size=new_size,
@@ -491,6 +496,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             pointer = struct.unpack_from('<Q', rebuilt, base+0x88)[0]
             if rebuilt[pointer:pointer+count*8] != original_data[old_pointer:old_pointer+count*8]:
                 raise EditError('原SRV绑定映射被改变。')
+    progress('validating', 0, 1)
     validation = candidate.validate_metadata_interfaces(dll, _in_worker=True, _reflections=reflections)
     if not validation['valid']:
         raise EditError(f'新增接口验证失败：{validation["issues"][0]}')
@@ -499,6 +505,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
         raise EditError('DXC 身份在执行期间改变，拒绝提交。')
     document.replacements, document.replacement_notes = candidate.replacements, candidate.replacement_notes
     document.metadata_edits = candidate.metadata_edits
+    progress('validated', 1, 1)
     return {'changed_shaders': len(reports), 'shader_reports': reports, 'srv_records': len(affected),
             'parameter_bytes': new_size, 'validation': validation, 'plan': plan.report(),
             'statistics': counters, 'seconds': {**durations, 'total': time.perf_counter()-started}}

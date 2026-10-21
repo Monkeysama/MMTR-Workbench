@@ -443,21 +443,73 @@ class Service:
         return self.snapshot()
 
 
+class RpcSession:
+    """JSON-lines 文档所有者；后台任务与 MCP 共用核心，短请求仍一问一答。"""
+    # 只读请求不推进 revision；其余已支持操作保守地视为状态写入。
+    READ_OPERATIONS = frozenset(('ping', 'snapshot', 'mdf_snapshot', 'mmtr_inspect_structure',
+        'material_plan', 'mmtr_validate_interfaces', 'mmtr_material_usage', 'disassemble', 'reconstruct',
+        'export_shader', 'export_layout', 'report', 'mdf_report', 'export_compiled'))
+
+    def __init__(self):
+        from threading import RLock
+        from .material_jobs import MaterialJobs
+        self.service = Service()
+        self.lock = RLock()
+        self.revision = 0
+        self.dll = self.service.handle({'op': 'ping'})['dxc']
+        self.jobs = MaterialJobs(self)
+
+    def handle(self, request):
+        op = request['op']
+        if op == 'material_job_status':
+            return self.jobs.status(request['job_id'])
+        if op == 'material_job_cancel':
+            return self.jobs.cancel(request['job_id'])
+        if op == 'material_job_result':
+            return self.jobs.result(request['job_id'], request.get('offset', 0), request.get('limit', 40))
+        with self.lock:
+            if 'dll' in request and request['dll'] != self.dll:
+                self.dll = request['dll']
+                self.revision += 1
+            if op == 'material_job_preview':
+                return self.jobs.preview(request.get('actions'), request.get('record_index'))
+            if op == 'material_job_submit':
+                return self.jobs.submit(request.get('actions'), request.get('record_index'),
+                                        request.get('expected_plan'), request.get('request_key'))
+            if op in ('material_plan', 'material_apply'):
+                request = {**request, 'source_revision': self.revision}
+            try:
+                result = self.service.handle(request)
+            finally:
+                # 旧同步操作可能先修改再报错，失败也不能让后台候选跨越该编辑提交。
+                if op not in self.READ_OPERATIONS:
+                    self.revision += 1
+            if isinstance(result, dict):
+                result = {**result, 'revision': self.revision}
+            return result
+
+    def close(self):
+        self.jobs.close()
+
+
 def main():
     if hasattr(sys.stdin,'reconfigure'):
         sys.stdin.reconfigure(encoding='utf-8')
         sys.stdout.reconfigure(encoding='utf-8')
-    service = Service()
-    for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            result = {'ok':True,'result':service.handle(request)}
-        except Exception as exc:
-            traceback.print_exc(file=sys.stderr)
-            result = {'ok':False,'error':str(exc)}
-            if isinstance(exc,DxcProcessError):result['details']=exc.details()
-        sys.stdout.write(json.dumps(result,ensure_ascii=False)+'\n')
-        sys.stdout.flush()
+    session = RpcSession()
+    try:
+        for line in sys.stdin:
+            try:
+                request = json.loads(line)
+                result = {'ok':True,'result':session.handle(request)}
+            except Exception as exc:
+                traceback.print_exc(file=sys.stderr)
+                result = {'ok':False,'error':str(exc)}
+                if isinstance(exc,DxcProcessError):result['details']=exc.details()
+            sys.stdout.write(json.dumps(result,ensure_ascii=False)+'\n')
+            sys.stdout.flush()
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

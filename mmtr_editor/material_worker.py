@@ -28,10 +28,12 @@ def execute(request):
     if request['op'] != 'extend':
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface
+    from .material_control import progress_writer
     report = extend_material_interface(document, request['material'], request['dll'],
                                         parameter=request.get('parameter'), texture=request.get('texture'),
                                         record_index=request.get('record_index'), actions=request.get('actions'),
-                                        plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'))
+                                        plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'),
+                                        progress=progress_writer(request.get('progress_file')))
     return {'document': document_state(document), 'report': report,
             'sha256': hashlib.sha256(document.build()[0]).hexdigest()}
 

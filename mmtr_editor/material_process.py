@@ -33,13 +33,18 @@ def restore_document(state):
 
 
 # 单次批处理独占一个可回收进程，避免逐Shader启动进程；原生崩溃/超时不影响编辑器。
-def run_material_task(document, operation, dll, *, timeout=300, **arguments):
+def run_material_task(document, operation, dll, *, timeout=300, worker_control=None, **arguments):
     command = ([sys.executable, '--material-worker'] if getattr(sys, 'frozen', False)
                else [sys.executable, '-m', 'mmtr_editor.material_worker'])
     request = {'protocol': 1, 'op': operation, 'dll': str(Path(dll).resolve()),
                'document': document_state(document), **arguments}
     try:
-        completed = subprocess.run(command, input=json.dumps(request, ensure_ascii=True).encode('utf-8'),
+        if worker_control is not None:
+            from .material_control import controlled_material_process
+            completed = controlled_material_process(command, request, timeout=timeout, control=worker_control,
+                cwd=None if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1])
+        else:
+            completed = subprocess.run(command, input=json.dumps(request, ensure_ascii=True).encode('utf-8'),
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    cwd=None if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1],
                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,

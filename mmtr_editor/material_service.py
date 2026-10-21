@@ -35,7 +35,8 @@ def prepare_material_batch(service, dll, actions, record_index=None, source_revi
 
 
 # 全批次只处理一个候选 MMTR/MDF；MDF 提前预构建，坏默认值或结构错误不浪费 DXC 工作。
-def apply_material_batch(service, dll, actions, record_index=None, source_revision=0, expected_plan=None):
+def apply_material_batch(service, dll, actions, record_index=None, source_revision=0, expected_plan=None,
+                         worker_control=None):
     plan, material, context = prepare_material_batch(service, dll, actions, record_index, source_revision)
     if expected_plan is not None and plan.digest != expected_plan:
         raise EditError('计划身份已改变，必须重新规划。')
@@ -47,8 +48,9 @@ def apply_material_batch(service, dll, actions, record_index=None, source_revisi
             candidate_mdf.add_texture(index, texture.name, texture.path)
     mdf_bytes = candidate_mdf.build()[0]
     reopened_mdf = MdfDocument(mdf_bytes, candidate_mdf.source)
+    control = {'worker_control': worker_control} if worker_control is not None else {}
     report = extend_in_worker(candidate_doc, material, dll, actions=actions, record_index=record_index,
-                              plan_context=context, expected_plan=plan.digest)
+                              plan_context=context, expected_plan=plan.digest, **control)
     reopened_doc = Document(candidate_doc.build()[0], candidate_doc.source)
     for index in plan.target_materials:
         if current_layout(reopened_doc, reopened_mdf.material(index)) != plan.new:
