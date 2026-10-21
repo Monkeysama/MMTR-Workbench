@@ -204,7 +204,7 @@ PS声明可以混有其它space的有限或无界SRV数组：这些声明保留�
 
 读取来源与地址迁移一致：heap 材质 CB、BindlessBuffer、UserMaterialInstances，另加静态绑定的 `UserMaterial` 常量缓冲与按名称绑定的纹理。无消费者的 `extractvalue` 不计入。每个函数独立解析 SSA；相同载荷只分析一次，但 `shader_count` 统计实际 Shader 条目。材质含 MMTRS（shader LOD 重定向）时，未按重定向证明的尾部偏移不归到具体字段，按名称证明的 SRV 仍可报告。缓存绑定 MMTR/MDF 字节、材质及 DXC 路径和内容，DLL 原路径被替换也会失效。
 
-此工具对应优化计划 P5 的消费者证明，返回的 `coverage.scope=bounded_dxil_consumers` 和 `coverage.deletion_supported=true` 仅表示后续有界执行器可处理该候选；不证明实际运行分支、所有外部使用者或游戏效果。报告不包含 IR，未知/间接访问仍拒绝。
+此工具对应优化计划 P5 的消费者证明，预检返回的 `coverage.scope=bounded_dxil_consumers` 和 `coverage.deletion_supported=false` 明确表示它仍是只读证明；只有 `workbench_removal_submit` 的执行报告才会在完整候选验证成功后标记 `deletion_supported=true`。两者都不证明实际运行分支、所有外部使用者或游戏效果。报告不包含 IR，未知/间接访问仍拒绝。
 
 `workbench_removal_preview` 在已知全部关联材质布局一致时启动只读后台任务。输入 `actions=[{"action":"parameter","name":"UnusedP"},{"action":"texture","name":"UnusedMap"}]`、非空 `request_key` 和可选 `material_index`；`workbench_removal_submit` 使用预览返回的 `plan_digest` 和新的请求键提交候选。两者查询/取消复用现有材质任务接口。结果 `eligible=true` 才能进入删除执行；已用、仅读取描述符、未知访问、句柄逃逸、跨函数调用和 MMTRS 阻止资格。执行器同步声明、STAT、绑定表、计数和已知 MDF，并在失败时不更新当前会话。独立变体可传既有变体目标，提交后仍需显式导出。逐 Shader 身份、失败与最终收缩布局见分页结果；边界见[删除边界](material-removal.md)。
 

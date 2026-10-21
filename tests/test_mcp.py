@@ -44,6 +44,8 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_removal_preview'].annotations.read_only_hint)
+        self.assertFalse(tools['workbench_removal_submit'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_removal_submit'].annotations.destructive_hint)
         self.assertTrue(tools['workbench_material_status'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_submit'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_cancel'].annotations.read_only_hint)
