@@ -37,6 +37,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_select_material`|切换后续操作使用的 MDF 材质|
 |`workbench_list`|分页搜索 shaders、passes、metadata、materials、properties、textures|
 |`workbench_inspect`|单个 Shader/通道/材质详情，分页 binding/changes 或只读 structure 报告|
+|`workbench_usage`|只读统计全部 Shader 对所选 MDF 材质参数、纹理与 GPBF 的实际读取，分页返回|
 |`workbench_read_shader`|分页读取 DXIL 或受限重建 HLSL|
 |`workbench_export_shader`|另存完整 DXBC、DXIL、HLSL 或最近编译结果|
 |`workbench_compile`|从源码字符串或文件编译，可直接严格替换指定 Shader|
@@ -130,6 +131,17 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 PS声明可以混有其它space的有限或无界SRV数组：这些声明保留原样，新增单个Texture2D只在space0有限范围末尾分配。space0本身无界、范围重叠或没有单纹理模板时仍拒绝。记录仍应选择包含MDF材质纹理名的PS表；仅有引擎资源的堆句柄绘制记录不能直接作为record_index。扩展器会同时检查并迁移已识别的堆材质纹理/GPBF读取，新增槽本身不自动被原Shader采样。连续新增会为每轮地址迁移分配独立临时变量名，可先加纹理再加参数。
 
 同一 MMTR 的其它材质使用者也必须匹配新布局。服务不会自动补齐全部使用者或改变 master；独立材质实验可用 `workbench_set_master` 显式设置独立 master，再打开与路径匹配的 MMTR。仅改输出文件名不等于 MDF 已改用该文件。
+
+## 材质读取统计
+
+`workbench_usage` 需要打开关联 MDF 并设置 DXC，在材质工作进程中反汇编每个不同载荷的 Shader，不修改文档。`kind` 选择 `parameters`、`textures`、`gpbf` 或 `failures`，`state_filter` 按状态筛选：
+
+- `used`：至少一个 Shader 读取。参数按读取字节落在参数偏移范围内判断；纹理要求句柄值流入 `createHandleFromHeap`，或按名称绑定的 SRV 被使用。
+- `descriptor`：读取了纹理描述符值，但未构造为资源句柄（例如只参与反馈或上报），槽位仍是有效的材质输入。
+- `unused`：全部 Shader 都不读取。只有 `complete` 对应类别为 true 时才给出。
+- `unknown`：存在无法证明身份的读取（与地址迁移的拒绝条件相同）、静态 `UserMaterial` 动态行索引或反汇编失败；`failures` 列出对应 Shader 与原因。
+
+读取来源与地址迁移一致：heap 材质 CB、BindlessBuffer、UserMaterialInstances，另加静态绑定的 `UserMaterial` 常量缓冲与按名称绑定的纹理。无消费者的 `extractvalue` 不计入。材质含 MMTRS（shader LOD 重定向）时，尾部字段位置未按重定向解析，纹理与 GPBF 标为不完整。同一 MMTR/MDF 字节、材质与 DXC 路径复用一份结果；用于判断可复用的参数行与纹理槽，或确认改写后的 Shader 确实读取新增参数。统计不证明运行时实际经过的分支。
 
 删除 MDF 字段不代表删除 MMTR Shader 接口；Sampler/UAV 和真正 MMTR 接口删除不提供自动迁移。手动 rename、expert 替换等仍受既有核心边界限制，不等于可运行布局已成立。`validate` 证明本次静态接口契约，不能替代 GPU 或游戏画面验收。
 
