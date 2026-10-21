@@ -4,6 +4,7 @@ import { request, isDesktop } from "../api";
 import { droppedDocuments, useDocumentDrop } from "./useDocumentDrop";
 import { serialEdits } from "../utils/serialEdits";
 import { useMaterialBatch } from "./useMaterialBatch";
+import { useMaterialRemoval, type RemovalAction } from "./useMaterialRemoval";
 import {
   basename,
   type CompileResult,
@@ -82,6 +83,17 @@ export function useWorkbench() {
       ir.value = "";
       sourceTrace.value = null;
       status.value = "批次已完成 · MMTR 与全部已知关联材质已同步，请分别另存";
+    },
+  });
+  // 删除沿用后台任务服务，预检通过后才允许提交完整 MMTR/MDF 候选。
+  const materialRemoval = useMaterialRemoval({
+    dll: () => dll.value,
+    drain: () => mdfEdits.drain(),
+    setBusy: value => { busy.value = value; },
+    committed: async () => {
+      const [mmtr, mdf] = await Promise.all([request<DocumentInfo>("snapshot"), request<MdfDocument | null>("mdf_snapshot")]);
+      doc.value = mmtr; mdfDoc.value = mdf; revision.value += 1; ir.value = "";
+      status.value = "删除已完成 · MMTR 与全部已知关联材质已同步，请分别另存";
     },
   });
 
@@ -431,6 +443,10 @@ export function useWorkbench() {
   function addMmtrParameter() {
     materialBatch.open("parameter");
   }
+  function removeMmtrInterface(action: RemovalAction) {
+    if (!action.name.trim()) { error.value = "请先输入或筛选要删除的接口名称。"; return; }
+    materialRemoval.open(action);
+  }
   async function deleteMmtrParameter(row: Metadata) {
     if (!doc.value || busy.value) return;
     const approved = await ask({ title: "删除 MMTR 参数？", description: `将从 UserMaterial metadata 删除 ${row.name}。Shader 字节码必须同步删除对应成员。`, value: "", kind: "confirm", confirmLabel: "删除" });
@@ -727,6 +743,7 @@ export function useWorkbench() {
   return {
     fileDrop,
     materialBatch,
+    materialRemoval,
     doc,
     mdfDoc,
     mdfSaving,
@@ -772,6 +789,7 @@ export function useWorkbench() {
     rename,
     addMmtrParameter,
     deleteMmtrParameter,
+    removeMmtrInterface,
     addMmtrResource,
     deleteMmtrResource,
     validateMmtrInterfaces,

@@ -16,7 +16,7 @@ import { Search, Download, Pencil, Trash2, Layers3 } from "lucide-vue-next";
 import { hex, type DocumentInfo, type Metadata } from "../types";
 const props = defineProps<{ doc: DocumentInfo; busy: boolean }>();
 type ResourceKind = "srvs" | "samplers" | "uavs";
-const emit = defineEmits<{ rename: [row: Metadata]; add: []; batch: []; remove: [row: Metadata]; "add-resource": [kind: ResourceKind]; "remove-resource": [kind: ResourceKind]; validate: []; export: [] }>();
+const emit = defineEmits<{ rename: [row: Metadata]; add: []; batch: []; remove: [row: Metadata]; "safe-remove": [action: { action: "parameter" | "texture"; name: string }]; "add-resource": [kind: ResourceKind]; "remove-resource": [kind: ResourceKind]; validate: []; export: [] }>();
 const search = shallowRef(""),
   buffer = shallowRef("UserMaterial"),
   page = shallowRef(1);
@@ -71,7 +71,7 @@ watch(
       type="info"
       :closable="false"
       show-icon
-      title="这里展示名称与布局；实际值由 MDF 或运行时提供。批量新增会同步 Shader 与关联 MDF；删除接口仍需单独处理 Shader。"
+      title="这里展示名称与布局；批量新增和安全删除会同步 Shader 与已知关联 MDF。"
     />
     <section class="panel data-panel">
       <div class="table-toolbar">
@@ -97,7 +97,7 @@ watch(
           >新增参数</ElButton
         ><ElButton v-if="resourceKind" :disabled="busy" @click="emit('add-resource', resourceKind!)"
           >新增 {{ resourceLabel }}</ElButton
-        ><ElButton v-if="resourceKind" :disabled="busy" @click="emit('remove-resource', resourceKind!)"
+        ><ElButton v-if="resourceKind && resourceKind !== 'srvs'" :disabled="busy" @click="emit('remove-resource', resourceKind!)"
           >删除 {{ resourceLabel }}</ElButton
         ><ElButton :disabled="busy" :loading="busy" title="检查已修改的 MMTR metadata 是否与关联 DXIL 接口一致" @click="emit('validate')"
           >验证 Shader 接口</ElButton
@@ -149,14 +149,14 @@ watch(
                 :aria-label="`修改名称 ${row.name}`"
                 @click="emit('rename', row as Metadata)"
                 ><Pencil :size="17" /></ElButton></ElTooltip><ElTooltip
-              v-if="row.kind === 'member' && row.buffer === 'UserMaterial'"
-              content="删除参数"
+              v-if="row.kind === 'member' && row.buffer === 'UserMaterial' || row.kind === 'srvs'"
+              :content="row.kind === 'srvs' ? '安全删除贴图槽' : '安全删除参数'"
               ><ElButton
                 text
                 type="danger"
                 :disabled="busy"
-                :aria-label="`删除参数 ${row.name}`"
-                @click="emit('remove', row as Metadata)"
+                :aria-label="`安全删除 ${row.name}`"
+                @click="emit('safe-remove', { action: row.kind === 'srvs' ? 'texture' : 'parameter', name: row.name })"
                 ><Trash2 :size="17" /></ElButton></ElTooltip></div></template></ElTableColumn
       ></ElTable>
       <footer class="table-footer">

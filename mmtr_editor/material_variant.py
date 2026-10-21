@@ -96,14 +96,22 @@ def _destinations(service, mmtr_path, mdf_path, master, *, overwrite):
 
 
 def prepare_material_variant(service, dll, actions, record_index, mmtr_path, mdf_path, master,
-                             source_revision=0, *, overwrite=False):
+                             source_revision=0, *, overwrite=False, operation='extend'):
     """只规划一个所选材质；已知其它使用者完整列出，未扫描范围不解释为无人使用。"""
     from .material_service import prepare_material_batch
     if service.doc is None or service.mdf is None:
         raise EditError('独立变体需要先打开 MMTR 与 MDF。')
     mmtr, mdf = _destinations(service, mmtr_path, mdf_path, master, overwrite=overwrite)
-    edit, _, _ = prepare_material_batch(service, dll, actions, record_index, source_revision,
-                                         variant_master=master)
+    if operation == 'remove':
+        from .material_removal_service import prepare_removal_preview, RemovalEditPlan
+        report, _ = prepare_removal_preview(service, dll, actions, service.mdf_selected, source_revision,
+                                            variant_master=master)
+        edit = RemovalEditPlan(report)
+    elif operation == 'extend':
+        edit, _, _ = prepare_material_batch(service, dll, actions, record_index, source_revision,
+                                             variant_master=master)
+    else:
+        raise EditError('未知变体操作。')
     snapshot = MdfDocument(service.mdf.build()[0], service.mdf.source)
     users = tuple((m['index'], m['name'], m['master']) for m in snapshot.materials
                   if master_matches(m['master'], str(service.doc.source)))
@@ -125,8 +133,13 @@ def build_material_variant(service, dll, actions, record_index, plan, *, worker_
     from .material_service import apply_material_batch
     _check_source(service, dll, plan)
     candidate = deepcopy(service)
-    report = apply_material_batch(candidate, dll, actions, record_index, plan.edit.source_revision,
-        expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master)
+    from .material_removal_service import RemovalEditPlan, apply_material_removal
+    if isinstance(plan.edit, RemovalEditPlan):
+        report = apply_material_removal(candidate, dll, actions, plan.selected_material, plan.edit.source_revision,
+            expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master)
+    else:
+        report = apply_material_batch(candidate, dll, actions, record_index, plan.edit.source_revision,
+            expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master)
     mmtr_bytes, mdf_bytes = candidate.doc.build()[0], candidate.mdf.build()[0]
     reopened = MdfDocument(mdf_bytes, candidate.mdf.source)
     original = MdfDocument(service.mdf.build()[0], service.mdf.source)

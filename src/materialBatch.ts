@@ -33,7 +33,9 @@ export interface VariantOptions {
 }
 export interface MaterialJob {
   job_id: string;
+  plan_digest: string;
   state: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "stale";
+  operation?: string;
   stage: string;
   completed: number;
   total: number;

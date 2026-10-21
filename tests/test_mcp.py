@@ -40,7 +40,7 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 31)
+        self.assertEqual(len(tools), 32)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_removal_preview'].annotations.read_only_hint)

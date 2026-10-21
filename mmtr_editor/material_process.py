@@ -76,11 +76,13 @@ def run_material_task(document, operation, dll, *, timeout=300, worker_control=N
 
 
 # 父进程重新核对源身份、容器、完整性和hash后才提交；失败不替换原编辑状态。
-def extend_in_worker(document, material, dll, **arguments):
+def extend_in_worker(document, material, dll, *, operation='extend', **arguments):
     from .mdf import _public_data
-    result = run_material_task(document, 'extend', dll, material=_public_data(material), **arguments)
+    if operation not in ('extend', 'remove'):
+        raise EditError('未知材质写入操作。')
+    result = run_material_task(document, operation, dll, material=_public_data(material), **arguments)
     from .material_plan import dll_identity
-    proof = result['report'].get('plan')
+    proof = result['report'].get('plan') if operation == 'extend' else result['report']
     if (not proof or proof['dxc_sha256'] != dll_identity(dll)
             or (arguments.get('expected_plan') and proof['digest'] != arguments['expected_plan'])):
         raise EditError('隔离进程返回的计划或 DXC 身份不一致。')

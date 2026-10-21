@@ -35,6 +35,13 @@ def execute(request):
                 compiler.disassemble, progress=progress_writer(request.get('progress_file')))
         finally:
             compiler.close()
+    if request['op'] == 'remove':
+        from .removal_execution import remove_material_interface
+        from .material_control import progress_writer
+        report = remove_material_interface(document, request['material'], request['dll'], request['actions'],
+            progress=progress_writer(request.get('progress_file')))
+        return {'document': document_state(document), 'report': report,
+                'sha256': hashlib.sha256(document.build()[0]).hexdigest()}
     if request['op'] != 'extend':
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface

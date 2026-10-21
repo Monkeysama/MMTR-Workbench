@@ -71,7 +71,7 @@ def plan_material_edit(document, material, dll, actions, record_index=None, *, s
     from .material_extension import current_layout, texture_tables
     if not isinstance(actions, list) or not 1 <= len(actions) <= 100:
         raise EditError('批次需要 1..100 个参数/纹理动作。')
-    if any(op['kind'] != 'extend_material_interface' for op in document.metadata_edits):
+    if any(op['kind'] not in ('extend_material_interface', 'remove_material_interface') for op in document.metadata_edits):
         raise EditError('请先完成或重置已有手动metadata修改，再自动扩展材质接口。')
     old = current_layout(document, material)
     info = document.current_info()

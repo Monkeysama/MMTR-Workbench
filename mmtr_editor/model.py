@@ -473,12 +473,14 @@ class Document:
         issues: list[dict] = []
         changed_cbuffers = {edit['cbuffer'] for edit in self.metadata_edits
                             if edit['kind'] in ('add_cbuffer_member', 'remove_cbuffer_member')}
-        extensions = [edit for edit in self.metadata_edits if edit['kind'] == 'extend_material_interface']
+        extensions = [edit for edit in self.metadata_edits if edit['kind'] in ('extend_material_interface', 'remove_material_interface')]
+        if any(edit['kind'] == 'remove_material_interface' and edit['layout']['removed_parameters'] for edit in extensions):
+            changed_cbuffers.add('UserMaterial')
         if any(edit.get('parameter') or edit.get('parameters') for edit in extensions):
             changed_cbuffers.add('UserMaterial')
         # 自动迁移证据绑定实际Shader字节；后续替换或手动修改不得复用旧通过结论。
         if extensions:
-            if any(edit['kind'] != 'extend_material_interface' for edit in self.metadata_edits):
+            if any(edit['kind'] not in ('extend_material_interface', 'remove_material_interface') for edit in self.metadata_edits):
                 issues.append({'kind': 'material_layout', 'problem': '自动扩展后不能混用未验证的手动metadata修改。'})
             redirects = [[record, field, target] for (record, field), target in sorted(self.redirects.items())]
             if redirects != extensions[-1]['redirects']:
@@ -869,6 +871,9 @@ class Document:
             if edit['kind'] == 'extend_material_interface':
                 from .material_extension import append_metadata
                 working = append_metadata(working, self.source, edit)
+            elif edit['kind'] == 'remove_material_interface':
+                from .removal_writer import remove_metadata
+                working = remove_metadata(working, self.source, edit)
             elif edit['kind'] == 'add_cbuffer_member':
                 working = _add_cbuffer_member_bytes(working, edit['cbuffer'], edit['name'], edit['byte_size'], edit['byte_offset'], self.source)
             elif edit['kind'] == 'remove_cbuffer_member':
@@ -927,7 +932,7 @@ class Document:
                   'reparse_valid': True, 'runtime_tested': False,
                   'limitations': (['Only proven UserMaterial tail/PS Texture2D layouts are migrated.',
                                    'DXIL IR is not original HLSL; offline DXC checks do not prove runtime appearance.']
-                                  if any(e['kind'] == 'extend_material_interface' for e in self.metadata_edits) else
+                                  if any(e['kind'] in ('extend_material_interface', 'remove_material_interface') for e in self.metadata_edits) else
                                   ['Unknown metadata preserved; only known shader references relocated.',
                                    'DXIL IR is not original HLSL. Resource tables are not regenerated.',
                                    'Internal DXBC checksum/DXIL validation is not implemented by the rebuilder.'])}

@@ -15,7 +15,7 @@ import uuid
 from .material_control import MaterialCancelled, WorkerControl
 from .material_plan import dll_identity
 from .material_service import apply_material_batch, prepare_material_batch
-from .material_removal_service import analyze_removal_preview, prepare_removal_preview
+from .material_removal_service import analyze_removal_preview, apply_material_removal, prepare_removal_preview
 from .model import EditError
 
 TERMINAL = frozenset(('succeeded', 'failed', 'cancelled', 'stale'))
@@ -61,8 +61,11 @@ class MaterialJobs:
         self.history_limit = history_limit
         self.closed = False
 
-    def _prepare(self, service, dll, actions, record_index, revision, variant):
+    def _prepare(self, service, dll, actions, record_index, revision, variant, operation='extend'):
         if variant is None:
+            if operation == 'remove':
+                report, _ = prepare_removal_preview(service, dll, actions, None, revision)
+                return report, report
             plan = prepare_material_batch(service, dll, actions, record_index, revision)[0]
             return plan, {**plan.report(), 'scope': 'shared_master', 'selected_material': service.mdf_selected,
                           'known_users': [[i, service.mdf.material(i)['name'], service.mdf.material(i)['master']]
@@ -74,7 +77,7 @@ class MaterialJobs:
             raise EditError('变体需要 mmtr_path、mdf_path、master 和可选布尔 overwrite。')
         plan = prepare_material_variant(service, dll, actions, record_index,
             variant['mmtr_path'], variant['mdf_path'], variant['master'], revision,
-            overwrite=variant.get('overwrite', False))
+            overwrite=variant.get('overwrite', False), operation=operation)
         return plan, {**plan.edit.report(), 'digest': plan.digest, 'scope': 'independent_variant',
                       'selected_material': plan.selected_material, 'known_users': plan.known_users,
                       'external_users': 'not_scanned',
@@ -89,16 +92,21 @@ class MaterialJobs:
     def submit(self, actions, record_index, expected_plan, request_key, *, variant=None):
         return self._submit(actions, record_index, expected_plan, request_key, variant=variant)
 
-    def removal_preview(self, actions, material_index, request_key):
+    def removal_preview(self, actions, material_index, request_key, *, variant=None):
         """短调用快照并启动只读消费者证明；与修改任务共享取消、去重及会话生命周期。"""
         return self._submit(actions, None, None, request_key, operation='removal_preview',
-                            material_index=material_index)
+                            material_index=material_index, variant=variant)
+
+    def removal_submit(self, actions, material_index, expected_plan, request_key, *, variant=None):
+        """提交有界删除事务；预览/执行动作和请求键均参与幂等身份。"""
+        return self._submit(actions, None, expected_plan, request_key, operation='removal',
+                            material_index=material_index, variant=variant)
 
     def _submit(self, actions, record_index, expected_plan, request_key, *, variant=None,
                 operation='extend', material_index=None):
         if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128 or not request_key.strip():
             raise EditError('request_key 必须是 1..128 字符的非空字符串。')
-        if operation == 'extend' and (not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan)):
+        if operation in ('extend', 'removal') and (not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan)):
             raise EditError('expected_plan 必须是预览返回的计划 digest。')
         try:
             encoded = json.dumps(dict(actions=actions, record_index=record_index, expected_plan=expected_plan,
@@ -126,14 +134,23 @@ class MaterialJobs:
                     raise EditError('会话任务历史已满；请另开会话，不会淘汰旧请求键后重复执行。')
             candidate = deepcopy(self.owner.service)
             dll = self.owner.dll
-            if operation == 'removal_preview':
+            if operation in ('removal_preview', 'removal') and request['variant'] is not None:
+                if material_index is not None and material_index != candidate.mdf_selected:
+                    raise EditError('独立删除变体必须使用当前所选材质。')
+                plan, report = self._prepare(candidate, dll, request['actions'], None,
+                    self.owner.revision, request['variant'], 'remove')
+            elif operation == 'removal_preview':
                 report, _ = prepare_removal_preview(candidate, dll, request['actions'],
                                                     material_index, self.owner.revision)
                 plan = None
+            elif operation == 'removal':
+                report, _ = prepare_removal_preview(candidate, dll, request['actions'],
+                    material_index, self.owner.revision)
+                plan = report
             else:
                 plan, report = self._prepare(candidate, dll, request['actions'], record_index,
                                              self.owner.revision, request['variant'])
-            if operation == 'extend' and report['digest'] != expected_plan:
+            if operation in ('extend', 'removal') and report['digest'] != expected_plan:
                 raise EditError('计划身份已改变，必须重新预览。')
             source = (str(candidate.doc.source), str(candidate.mdf.source), candidate.mdf_selected, str(dll))
             control = WorkerControl()
@@ -171,15 +188,22 @@ class MaterialJobs:
                 job.state, job.stage = 'running', 'preparing'
             variant_candidate = None
             if job.operation == 'removal_preview':
+                extra = {} if job.variant_plan is None else {'variant_master': job.variant_plan.edit.variant_master}
                 result = analyze_removal_preview(candidate, dll, request['actions'],
-                    job.plan['selected_material'], job.plan['source_revision'], worker_control=job.control)
-                if result['plan']['digest'] != job.plan['digest']:
+                    job.plan['selected_material'], job.plan['source_revision'], worker_control=job.control, **extra)
+                digest = job.plan['digest'] if job.variant_plan is None else job.variant_plan.edit.digest
+                if result['plan']['digest'] != digest:
                     raise _StaleCandidate('删除预检的快照计划已改变，结果已丢弃。')
+                result['plan'] = job.plan
             elif job.variant_plan is not None:
                 from .material_variant import build_material_variant
                 variant_candidate = build_material_variant(candidate, dll, request['actions'],
                     request['record_index'], job.variant_plan, worker_control=job.control)
                 result = {**variant_candidate.report, 'plan': job.plan, 'scope': 'independent_variant'}
+            elif job.operation == 'removal':
+                result = apply_material_removal(candidate, dll, request['actions'],
+                    job.plan['selected_material'], job.plan['source_revision'], expected_plan=job.plan['digest'],
+                    worker_control=job.control)
             else:
                 result = apply_material_batch(candidate, dll, request['actions'], request['record_index'],
                     job.plan['source_revision'], expected_plan=job.plan['digest'], worker_control=job.control)

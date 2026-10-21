@@ -257,7 +257,10 @@ def current_layout(document, material, info=None):
     size = buffers[0]['buffer_size']
     textures = tuple(t['name'] for t in material['textures'])
     gpbf = tuple(g['name'] for g in material['gpbf'])
-    extensions = [op for op in document.metadata_edits if op['kind'] == 'extend_material_interface']
+    extensions = [op for op in document.metadata_edits if op['kind'] in ('extend_material_interface', 'remove_material_interface')]
+    # 删除已同步完整 MDF 后必须严格重开证明，不能复用删除前扩展的纹理尾部。
+    if extensions and extensions[-1]['kind'] == 'remove_material_interface':
+        extensions = []
     if extensions:
         saved = extensions[-1]
         expected = tuple(saved['textures'])

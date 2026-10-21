@@ -118,7 +118,7 @@ class VariantOptions(BaseModel):
 
 
 class RemovalAction(BaseModel):
-    """P5 删除预检动作；执行删除仍需后续候选导出能力。"""
+    """P5 有界删除目标；消费者证明与完整候选验证分别执行。"""
     model_config = ConfigDict(extra='forbid')
     action: Literal['parameter', 'texture']
     name: Name
@@ -461,12 +461,21 @@ def create_server(session=None):
     @tool(job=True)
     def workbench_removal_preview(actions: RemovalActions,
             request_key: Annotated[str, Field(min_length=1, max_length=128)],
-            material_index: Index | None = None) -> dict[str, Any]:
+            material_index: Index | None = None, variant: VariantOptions | None = None) -> dict[str, Any]:
         """短调用启动只读删除预检；用 material_status/result 查询、material_cancel 取消。
         验证已覆盖 DXIL 消费者及最终布局；不修改文档、不导出，不能作为运行时删除许可。
-        重试必须沿用相同 request_key、动作和材质；结果明确标记 deletion_supported=false。
+        重试必须沿用相同 request_key、动作和材质；eligible 仅对 bounded_dxil_consumers 覆盖成立，提交仍需单独调用 removal_submit。
         """
-        return state.jobs.removal_preview([action.model_dump() for action in actions], material_index, request_key)
+        return state.jobs.removal_preview([action.model_dump() for action in actions], material_index, request_key,
+            variant=None if variant is None else variant.model_dump())
+
+    @tool(job=True, job_write=True)
+    def workbench_removal_submit(actions: RemovalActions, expected_plan: str,
+            request_key: Annotated[str, Field(min_length=1, max_length=128)], material_index: Index | None = None,
+            variant: VariantOptions | None = None) -> dict[str, Any]:
+        """执行有界 MMTR/MDF 删除候选；只能提交未使用且完整覆盖的参数/Texture2D，结果重解析验证后更新会话。"""
+        return state.jobs.removal_submit([action.model_dump() for action in actions], material_index,
+                                         expected_plan, request_key, variant=None if variant is None else variant.model_dump())
 
     @tool()
     def workbench_read_shader(index: Index, format: Literal['dxil', 'hlsl'] = 'dxil',

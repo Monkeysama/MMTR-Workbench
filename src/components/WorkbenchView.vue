@@ -34,6 +34,7 @@ import OverviewPanel from "./OverviewPanel.vue";
 import PassPanel from "./PassPanel.vue";
 import ShaderPanel from "./ShaderPanel.vue";
 import MetadataPanel from "./MetadataPanel.vue";
+import MaterialRemovalDialog from "./material/MaterialRemovalDialog.vue";
 import SourcePanel from "./SourcePanel.vue";
 import MdfPanel from "./MdfPanel.vue";
 import FileDialog from "./FileDialog.vue";
@@ -240,6 +241,7 @@ function navigate(id: string) {
             @add="wb.addMmtrParameter"
             @batch="wb.materialBatch.open()"
             @remove="wb.deleteMmtrParameter"
+            @safe-remove="wb.removeMmtrInterface"
             @add-resource="wb.addMmtrResource"
             @remove-resource="wb.deleteMmtrResource"
             @validate="wb.validateMmtrInterfaces"
@@ -353,6 +355,14 @@ function navigate(id: string) {
         @save-project="wb.materialBatch.saveProject" @read-project="wb.materialBatch.readProject"
         @add="wb.materialBatch.add" @close="wb.materialBatch.close" @preview="wb.materialBatch.preview"
         @start="wb.materialBatch.start" @cancel="wb.materialBatch.cancel" @retry="wb.materialBatch.submitPending" />
+      <MaterialRemovalDialog v-if="wb.materialRemoval.visible.value"
+        v-model="wb.materialRemoval.visible.value"
+        :action="wb.materialRemoval.action.value" :job="wb.materialRemoval.job.value"
+        :eligible="!!wb.materialRemoval.report.value?.eligible"
+        :failures="wb.materialRemoval.report.value?.failures ?? []"
+        :error="wb.materialRemoval.error.value" :loading="wb.materialRemoval.loading.value"
+        :working="wb.materialRemoval.working.value" :pending="!!wb.materialRemoval.pending.value"
+        @preview="wb.materialRemoval.preview" @remove="wb.materialRemoval.remove" @cancel="wb.materialRemoval.cancel" @retry="wb.materialRemoval.retry" />
     </div>
   </ElConfigProvider>
 </template>
