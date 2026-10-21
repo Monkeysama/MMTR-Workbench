@@ -343,10 +343,14 @@ function navigate(id: string) {
       <FileDialog v-if="dialog" :dialog="dialog" @done="wb.finishDialog" />
       <MaterialBatchDialog v-if="wb.materialBatch.visible.value"
         v-model:rows="wb.materialBatch.rows.value" v-model:record="wb.materialBatch.record.value"
+        v-model:mode="wb.materialBatch.mode.value" v-model:variant="wb.materialBatch.variant.value"
         :passes="doc?.passes ?? []" :plan="wb.materialBatch.plan.value" :job="wb.materialBatch.job.value"
         :error="wb.materialBatch.error.value" :working="wb.materialBatch.working.value"
         :loading="wb.materialBatch.loading.value" :pending="!!wb.materialBatch.pending.value"
         :has-textures="wb.materialBatch.hasTextures.value"
+        :notice="wb.materialBatch.notice.value" :candidate="wb.materialBatch.candidate.value"
+        @choose="wb.materialBatch.chooseTarget" @export="wb.materialBatch.exportVariant" @discard="wb.materialBatch.discardVariant"
+        @save-project="wb.materialBatch.saveProject" @read-project="wb.materialBatch.readProject"
         @add="wb.materialBatch.add" @close="wb.materialBatch.close" @preview="wb.materialBatch.preview"
         @start="wb.materialBatch.start" @cancel="wb.materialBatch.cancel" @retry="wb.materialBatch.submitPending" />
     </div>

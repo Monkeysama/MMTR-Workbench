@@ -68,6 +68,7 @@ export function useWorkbench() {
   // 批量任务复用核心事务，成功后只刷新已提交文档并推进一次未保存计数。
   const materialBatch = useMaterialBatch({
     dll,
+    choosePath: (title, kind, value) => path(title, kind, value),
     blocked: () => busy.value || !!dialog.value || !doc.value,
     drain: () => mdfEdits.drain(),
     setBusy: value => { busy.value = value; },

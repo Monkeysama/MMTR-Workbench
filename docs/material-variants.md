@@ -1,6 +1,6 @@
 # 独立变体与轻量工程（P4）
 
-核心与桌面 JSON-lines/MCP 后台入口共用 P3 任务管理器，并提供 schema 版本化工程。共享 master 仍同步全部已知关联材质；独立变体只同步所选材质并产生显式导出候选。桌面表单另行进行实际交互验收，不能由协议测试推断桌面或游戏通过。
+核心与桌面 JSON-lines/MCP 后台入口共用 P3 任务管理器，并提供 schema 版本化工程。共享 master 仍同步全部已知关联材质；独立变体只同步所选材质并产生显式导出候选。桌面与协议分别验收，不由静态或桌面结果推断游戏通过。
 
 ## 假设与停止点
 
@@ -36,4 +36,8 @@ Service 在整个操作中保持源文档与编辑，导出结果另行打开。
 
 相关测试为 tests/test_material_variant.py、tests/test_material_project.py 与 MCP 契约。适配检查点核心355项：267通过/88项可选语料skip；MCP21项通过。源码与当前冻结 EXE 的真实 SDK stdio 各验证30工具、工程恢复后重新计划、共享两材质/独立一材质、候选不改源不写文件、导出重开及其它材质语义不变、预览后目标冲突拒绝、幂等导出、丢弃和源 revision 变化拒绝。自有两Shader样本的状态调用最大0.0018/0.0017秒，不能推广为大文件耗时。
 
-回归日志在忽略的 output/p4-variant-*、output/p4-project-*，协议脚本及收据在 output/p4-source-mcp、output/p4-frozen-mcp。未执行 GPU 或真实游戏验收，版本保持0.3.0；桌面交互、实际Tauri及便携包验收仍是本阶段下一检查点。
+桌面浏览器实测保存工程、修改草稿后恢复、重新预览、候选导出和丢弃；路径选择对话框可在批量表单上正常操作。624px高视口下曾出现底部按钮溢出，现采用有界对话框和内容内部滚动，按钮保持可见。导出/丢弃清除旧预览，工程恢复不直接开放执行。
+
+实际Tauri release/WebView2连接当前冻结sidecar，读取同一自有HLSL工程、调整独立输出、保存、预览及执行后显式导出成功。原会话MMTR/MDF SHA256均不变，输出由独立Python解析器重开，所选材质master/参数/NullBlack槽及32B最终布局符合预期，另一材质完整公开语义保持。TypeScript/Vite、单任务Rust release构建及前端20通过/1缺fixture跳过；控制台无新增错误。
+
+回归日志在忽略的 output/p4-variant-*、output/p4-project-*，协议脚本及收据在 output/p4-source-mcp、output/p4-frozen-mcp，桌面截图与重开结果在 output/p4-ui、output/p4-desktop。未执行 GPU 或真实游戏验收，版本保持0.3.0。便携包独立输出到release/p4-20261021，不覆盖P3已交付包；五项manifest大小/hash、ZIP内容和当前desktop/core身份检查通过，包内真实MCP完整P4流程也通过（两Shader样本状态最大0.0136秒）。本节点完成P4的离线/桌面交付，不宣称游戏效果已验收；下一阶段P5复用现有读取模块，先补消费者与覆盖证明，再独立开放有界删除。

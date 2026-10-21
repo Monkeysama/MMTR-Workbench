@@ -19,6 +19,17 @@ export interface MaterialPlan {
   parameters: Array<{ name: string; byte_size: number; byte_offset: number; values: number[] }>;
   textures: Array<{ name: string; path: string }>;
   shader_candidates: number[];
+  scope?: "shared_master" | "independent_variant";
+  selected_material?: number;
+  known_users?: Array<[number, string, string]>;
+  external_users?: "not_scanned";
+  variant?: { mmtr: { path: string }; mdf: { path: string } };
+}
+export interface VariantOptions {
+  master: string;
+  mmtr_path: string;
+  mdf_path: string;
+  overwrite: boolean;
 }
 export interface MaterialJob {
   job_id: string;
@@ -28,6 +39,9 @@ export interface MaterialJob {
   total: number;
   elapsed_seconds: number;
   error: string | null;
+  scope?: "shared_master" | "independent_variant";
+  candidate_available?: boolean;
+  exported?: boolean;
 }
 export const terminalJob = (job: MaterialJob) =>
   ["succeeded", "failed", "cancelled", "stale"].includes(job.state);
