@@ -25,6 +25,8 @@ class Service:
         self.mdf_link_report = None
         self.mdf_link_doc = None
         self.mdf_migration = None
+        # 桌面会话在导出前更新全部标签的源路径；纯路径可随候选安全复制。
+        self.workspace_sources = ()
 
     def snapshot(self):
         d = self.doc
@@ -132,6 +134,10 @@ class Service:
     # 导出目标预检独立于写入，供MCP在多文件事务开始前检查全部源文件保护。
     def check_write_target(self, path):
         path = Path(path).resolve()
+        for source in self.workspace_sources:
+            source = Path(source)
+            if path == source or (path.exists() and source.exists() and path.samefile(source)):
+                raise EditError('不能覆盖任一已打开标签的源文件。')
         if self.doc and (path == self.doc.source or (path.exists() and self.doc.source.exists() and path.samefile(self.doc.source))):
             raise EditError('不能覆盖打开的原始 MMTR。')
         if self.mdf and self.mdf.source and (path == self.mdf.source or (path.exists() and path.samefile(self.mdf.source))):
@@ -443,70 +449,216 @@ class Service:
         return self.snapshot()
 
 
+class _RpcContext:
+    """单个桌面标签的文档上下文；锁、revision 与后台任务均只属于该上下文。"""
+
+    def __init__(self, context_id: str):
+        from threading import RLock
+        from .material_jobs import MaterialJobs
+        self.context_id = context_id
+        self.service = Service()
+        self.lock = RLock()
+        self.revision = 0
+        self.exported_revision = 0
+        self.dll = self.service.handle({'op': 'ping'})['dxc']
+        self.jobs = MaterialJobs(self)
+
+    def invalidate(self):
+        """兼容任务提交的失效通知；桌面派生视图由快照重建。"""
+        return None
+
+    def unsaved(self):
+        """关闭保护只比较已导出的 MMTR revision 和 MDF 实际构建哈希。"""
+        mdf = self.service.mdf
+        return bool(self.service.doc and self.service.doc.dirty and self.revision != self.exported_revision) or bool(
+            mdf and mdf.build()[1]['sha256'] != mdf.saved_sha256)
+
+    def pending(self):
+        """任务锁只用于读取状态；关闭时必须在释放锁后回收线程。"""
+        from .material_jobs import TERMINAL
+        with self.jobs.lock:
+            return any(job.state not in TERMINAL or job.variant_candidate is not None for job in self.jobs.jobs.values())
+
+    def close(self):
+        """停止该标签下的后台任务并释放其 DXC 子进程。"""
+        self.jobs.close()
+
+
 class RpcSession:
-    """JSON-lines 文档所有者；后台任务与 MCP 共用核心，短请求仍一问一答。"""
+    """JSON-lines 文档所有者；一个进程可隔离持有多个桌面标签。"""
     # 只读请求不推进 revision；其余已支持操作保守地视为状态写入。
     READ_OPERATIONS = frozenset(('ping', 'snapshot', 'mdf_snapshot', 'mmtr_inspect_structure',
         'material_plan', 'mmtr_validate_interfaces', 'mmtr_material_usage', 'disassemble', 'reconstruct',
         'export_shader', 'export_layout', 'report', 'mdf_report', 'export_compiled'))
 
     def __init__(self):
-        from threading import RLock
-        from .material_jobs import MaterialJobs
-        self.service = Service()
-        self.lock = RLock()
-        self.revision = 0
-        self.dll = self.service.handle({'op': 'ping'})['dxc']
-        self.jobs = MaterialJobs(self)
+        self.contexts = {'default': _RpcContext('default')}
+        self.retired = set()
+
+    @property
+    def _default(self):
+        return self.contexts['default']
+
+    # 兼容现有桌面测试和旧调用方；新请求通过 document_id 访问具体上下文。
+    @property
+    def service(self):
+        return self._default.service
+
+    @service.setter
+    def service(self, value):
+        self._default.service = value
+
+    @property
+    def lock(self):
+        return self._default.lock
+
+    @property
+    def revision(self):
+        return self._default.revision
+
+    @revision.setter
+    def revision(self, value):
+        self._default.revision = value
+
+    @property
+    def dll(self):
+        return self._default.dll
+
+    @dll.setter
+    def dll(self, value):
+        self._default.dll = value
+
+    @property
+    def jobs(self):
+        return self._default.jobs
+
+    def _context(self, context_id):
+        """解析请求上下文；未知标签明确报错，避免把结果写入当前标签。"""
+        if not isinstance(context_id, str) or not context_id.strip():
+            raise EditError('document_id 必须是非空字符串。')
+        context = self.contexts.get(context_id)
+        if context is None:
+            raise EditError('文档标签不存在，请先创建或重新打开。')
+        return context
+
+    def _create_context(self, context_id):
+        """创建空文档标签；重复创建保留原上下文，保证重试幂等。"""
+        if not isinstance(context_id, str) or not context_id.strip():
+            raise EditError('document_id 必须是非空字符串。')
+        if context_id in self.retired:
+            raise EditError('文档标签已关闭，不能重用其 document_id。')
+        if context_id not in self.contexts:
+            self.contexts[context_id] = _RpcContext(context_id)
+        return self.contexts[context_id]
+
+    def _with_context(self, result, context_id):
+        if isinstance(result, dict):
+            return {**result, 'document_id': context_id}
+        return result
+
+    def _sources(self):
+        """聚合所有打开源文件，包含迁移分析依赖；不把会话对象放进候选。"""
+        paths = set()
+        for context in self.contexts.values():
+            service = context.service
+            for doc in (service.doc, service.mdf, service.mdf_link_doc):
+                if doc and doc.source:
+                    paths.add(Path(doc.source).resolve())
+            if service.mdf_migration:
+                paths.update(Path(service.mdf_migration[key]['source']).resolve() for key in ('source_mmtr', 'target_mmtr'))
+        return tuple(paths)
+
+    def _check_open(self, context_id, path):
+        """同源与硬链接只允许一个可编辑上下文，防止多份 MDF 各自导出。"""
+        path = Path(path).resolve()
+        for other_id, context in self.contexts.items():
+            if other_id == context_id:
+                continue
+            for doc in (context.service.doc, context.service.mdf):
+                if doc and doc.source:
+                    source = Path(doc.source).resolve()
+                    if path == source or (path.exists() and source.exists() and path.samefile(source)):
+                        raise EditError(f'该源文件已在其他标签中打开（{other_id}），请切换到已有标签。')
 
     def handle(self, request):
         op = request['op']
+        context_id = request.get('document_id', 'default')
+        if op == 'workspace_new':
+            context = self._create_context(context_id)
+            return {'document_id': context.context_id, 'revision': context.revision}
+        if op == 'workspace_list':
+            return {'documents': [
+                {'document_id': context.context_id,
+                 'source': str(context.service.doc.source) if context.service.doc else None,
+                 'mdf_source': str(context.service.mdf.source) if context.service.mdf and context.service.mdf.source else None,
+                 'dirty': context.unsaved(), 'pending': context.pending(),
+                 'revision': context.revision}
+                for context in self.contexts.values()
+            ]}
+        if op == 'workspace_close':
+            context = self._context(context_id)
+            if (context.unsaved() or context.pending()) and request.get('discard') is not True:
+                raise EditError('标签有未保存修改或后台任务，请确认放弃后关闭。')
+            context.close()
+            del self.contexts[context_id]
+            self.retired.add(context_id)
+            return {'document_id': context_id, 'closed': True}
+        context = self._context(context_id)
+        # JSON-lines 分发串行；任务导出也在调用线程执行，因此预检覆盖写入时的全部源。
+        context.service.workspace_sources = self._sources()
+        if op in ('open', 'mdf_open'):
+            self._check_open(context_id, request['path'])
+        if op in ('export', 'export_shader', 'export_compiled', 'export_layout', 'report', 'mdf_export', 'mdf_report', 'material_project_save'):
+            context.service.check_write_target(request['path'])
         if op == 'material_job_status':
-            return self.jobs.status(request['job_id'])
+            return self._with_context(context.jobs.status(request['job_id']), context_id)
         if op == 'material_job_cancel':
-            return self.jobs.cancel(request['job_id'])
+            return self._with_context(context.jobs.cancel(request['job_id']), context_id)
         if op == 'material_job_result':
-            return self.jobs.result(request['job_id'], request.get('offset', 0), request.get('limit', 40))
+            return self._with_context(context.jobs.result(request['job_id'], request.get('offset', 0), request.get('limit', 40)), context_id)
         if op == 'material_variant_export':
-            return self.jobs.export_variant(request['job_id'])
+            return self._with_context(context.jobs.export_variant(request['job_id']), context_id)
         if op == 'material_variant_discard':
-            return self.jobs.discard_variant(request['job_id'])
-        with self.lock:
-            if 'dll' in request and request['dll'] != self.dll:
-                self.dll = request['dll']
-                self.revision += 1
+            return self._with_context(context.jobs.discard_variant(request['job_id']), context_id)
+        with context.lock:
+            if 'dll' in request and request['dll'] != context.dll:
+                context.dll = request['dll']
+                context.revision += 1
             if op == 'material_removal_preview':
-                return self.jobs.removal_preview(request.get('actions'), request.get('material_index'),
-                                                 request.get('request_key'), variant=request.get('variant'))
+                return self._with_context(context.jobs.removal_preview(request.get('actions'), request.get('material_index'),
+                                                 request.get('request_key'), variant=request.get('variant')), context_id)
             if op == 'material_removal_submit':
-                return self.jobs.removal_submit(request.get('actions'), request.get('material_index'),
-                    request.get('expected_plan'), request.get('request_key'), variant=request.get('variant'))
+                return self._with_context(context.jobs.removal_submit(request.get('actions'), request.get('material_index'),
+                    request.get('expected_plan'), request.get('request_key'), variant=request.get('variant')), context_id)
             if op == 'material_job_preview':
-                return self.jobs.preview(request.get('actions'), request.get('record_index'), variant=request.get('variant'))
+                return self._with_context(context.jobs.preview(request.get('actions'), request.get('record_index'), variant=request.get('variant')), context_id)
             if op == 'material_job_submit':
-                return self.jobs.submit(request.get('actions'), request.get('record_index'),
-                                        request.get('expected_plan'), request.get('request_key'), variant=request.get('variant'))
+                return self._with_context(context.jobs.submit(request.get('actions'), request.get('record_index'),
+                                        request.get('expected_plan'), request.get('request_key'), variant=request.get('variant')), context_id)
             if op == 'material_project_save':
                 from .material_project import save_project
-                return save_project(self, request['path'], request.get('actions'), request.get('record_index'),
-                                    variant=request.get('variant'), overwrite=request.get('overwrite', False))
+                return self._with_context(save_project(context, request['path'], request.get('actions'), request.get('record_index'),
+                                    variant=request.get('variant'), overwrite=request.get('overwrite', False)), context_id)
             if op == 'material_project_read':
                 from .material_project import read_project
-                return read_project(self, request['path'])
+                return self._with_context(read_project(context, request['path']), context_id)
             if op in ('material_plan', 'material_apply'):
-                request = {**request, 'source_revision': self.revision}
+                request = {**request, 'source_revision': context.revision}
             try:
-                result = self.service.handle(request)
+                result = context.service.handle(request)
             finally:
                 # 旧同步操作可能先修改再报错，失败也不能让后台候选跨越该编辑提交。
                 if op not in self.READ_OPERATIONS:
-                    self.revision += 1
+                    context.revision += 1
+            if op in ('open', 'export'):
+                context.exported_revision = context.revision
             if isinstance(result, dict):
-                result = {**result, 'revision': self.revision}
-            return result
+                result = {**result, 'revision': context.revision}
+            return self._with_context(result, context_id)
 
     def close(self):
-        self.jobs.close()
+        for context in list(self.contexts.values()):
+            context.close()
 
 
 def main():
