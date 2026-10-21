@@ -340,7 +340,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             actual_reads = {ex['ssa']: ex['offset'] for r in compiled_reads if r['kind'] != 'instance' for ex in r['extracts']}
             if any(actual_reads.get(ssa) != old.offset_in(offset, new) for ssa, offset in previous_reads.items()):
                 raise EditError(f'Shader #{index} 编译后材质字段读取不一致。')
-            if any(r['stride']['bytes'] != new_size for r in compiled_reads if r['kind'] == 'instance'):
+            # 常量地址的0号实例读取没有步长，偏移由迁移保证仍在原参数区内。
+            if any(r['stride'] and r['stride']['bytes'] != new_size for r in compiled_reads if r['kind'] == 'instance'):
                 raise EditError('编译后参数实例步长不一致。')
             if before['structured_buffers'] != after['structured_buffers']:
                 raise EditError('结构化缓冲反射发生意外变化。')
