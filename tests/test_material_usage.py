@@ -108,6 +108,20 @@ class MaterialUsageTests(unittest.TestCase):
         self.assertFalse(report['complete']['parameters'])
         self.assertIn('aggregate', report['failures'][0]['error'])
 
+    # 参数实例流的读取计入参数；超出参数区的常量地址不解释为尾部字段。
+    def test_instance_reads_count_as_parameters_only(self):
+        def instance(address):
+            return ('; UserMaterialInstances texture byte r/o T0 t0 1\ndefine void @main() {\n'
+                    '  %raw = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 0, i32 0, i32 0, i1 false)\n'
+                    f'  %load = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %raw, i32 {address}, i32 undef, i8 15, i32 4)\n'
+                    '  %v = extractvalue %dx.types.ResRet.i32 %load, 0\n  %u = add i32 %v, 1\n  ret void\n}\n')
+        report = usage([instance(16)])
+        self.assertEqual(states(report, 'parameters')['p2'], 'used')
+        self.assertTrue(report['complete']['textures'])
+        report = usage([instance(32)])
+        self.assertEqual(states(report, 'textures'), {'texA': 'unknown', 'texB': 'unknown'})
+        self.assertIn('实例编号', report['failures'][0]['error'])
+
     # MMTRS 改变尾部字段位置；在支持重定向前，纹理结果必须标为不完整。
     def test_mmtrs_material_marks_tail_incomplete(self):
         report = usage([HEAP_IR], {**MATERIAL, 'mmtrs': [[1, 0]]})

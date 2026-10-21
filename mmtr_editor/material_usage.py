@@ -36,13 +36,15 @@ def _reaches_heap_handle(uses, ssa, limit=64):
 # record_handles 为其值流入 createHandleFromHeap 的记录偏移。
 def shader_input_reads(ir, cbuffer_name='UserMaterial'):
     definitions, uses, _ = parse(ir)
-    result = {'record': set(), 'record_handles': set(), 'cbuffer': set(), 'textures': set(), 'errors': []}
+    result = {'record': set(), 'record_handles': set(), 'instance': set(), 'cbuffer': set(), 'textures': set(),
+              'errors': []}
     try:
         for read in material_reads(ir):
             for extract in read['extracts']:
                 # 无消费者的 extractvalue 不代表实际取值。
                 if uses.get(extract['ssa']):
-                    result['record'].add(extract['offset'])
+                    # 参数实例流只含参数区；其偏移不能解释为尾部纹理/GPBF字段。
+                    result['instance' if read['kind'] == 'instance' else 'record'].add(extract['offset'])
                     if _reaches_heap_handle(uses, extract['ssa']):
                         result['record_handles'].add(extract['offset'])
     except ValueError as exc:
@@ -98,6 +100,12 @@ def material_input_usage(document, material, layout, disassemble):
             continue
         for scope, error in reads['errors']:
             failures.append({'shader': shader['index'], 'scope': scope, 'error': error})
+        for offset in reads['instance']:
+            if offset >= layout.parameter_bytes:
+                failures.append({'shader': shader['index'], 'scope': 'record',
+                                 'error': f'参数实例读取偏移 {offset} 超出参数区，无法证明实例编号。'})
+            else:
+                cbuffer_reads.setdefault(offset, set()).add(shader['index'])
         for offset in reads['record']:
             record_reads.setdefault(offset, set()).add(shader['index'])
         for offset in reads['record_handles']:

@@ -171,6 +171,70 @@ class MaterialAddressesTests(unittest.TestCase):
             relocate_material_reads(ir.replace('%base, 16','%base, 64'),OLD,NEW)
 
 
+# 步长为2的幂的参数实例流：编译器以shl代替mul，字段以or附加；常量地址为计算Shader的0号实例。
+SHL_OLD = MaterialTailLayout(512, ('tex0',), ())
+SHL_NEW = MaterialTailLayout(528, ('tex0',), ())
+
+
+def instance_ir(address_lines, address):
+    return ('define void @main() {\n'
+            '  %raw = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 0, i32 0, i32 0, i1 false)\n'
+            + ''.join(f'  {line}\n' for line in address_lines) +
+            f'  %load = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %raw, i32 {address}, i32 undef, i8 15, i32 4)\n'
+            '  %value = extractvalue %dx.types.ResRet.i32 %load, 1\n'
+            '  ret void\n}\n'
+            '; UserMaterialInstances texture byte r/o T0 t0 1\n')
+
+
+class InstanceStrideFormsTests(unittest.TestCase):
+    def test_shl_stride_with_or_offset_relocates_to_mul_and_add(self):
+        for flags in ('', ' nuw nsw'):
+            ir = instance_ir([f'%base = shl{flags} i32 %instance, 9', '%addr = or i32 %base, 224'], '%addr')
+            with self.subTest(flags=flags):
+                read, = material_reads(ir)
+                self.assertEqual((read['stride']['bytes'], read['stride']['op']), (512, 'shl'))
+                self.assertEqual([ex['offset'] for ex in read['extracts']], [228])
+                updated, report = relocate_material_reads(ir, SHL_OLD, SHL_NEW)
+                self.assertIn('%base = mul i32 %instance, 528', updated)
+                self.assertIn('%addr = add i32 %base, 224', updated)
+                self.assertEqual(report['instance_stride_ssa'], ['%base'])
+                after, = material_reads(updated)
+                self.assertEqual(after['stride']['bytes'], 528)
+                self.assertEqual([ex['offset'] for ex in after['extracts']], [228])
+                # 新步长不是2的幂时 or 不再等价于加法；原步长下二者等价。
+                self.assertNotEqual(3 * 528 | 224, 3 * 528 + 224)
+                self.assertEqual(3 * 512 | 224, 3 * 512 + 224)
+
+    def test_shl_stride_without_offset_and_unproven_forms(self):
+        ir = instance_ir(['%base = shl i32 %instance, 9'], '%base')
+        updated, _ = relocate_material_reads(ir, SHL_OLD, SHL_NEW)
+        self.assertIn('%base = mul i32 %instance, 528', updated)
+        with self.assertRaisesRegex(ValueError, 'OR地址'):
+            material_reads(instance_ir(['%base = shl i32 %instance, 9', '%addr = or i32 %base, 512'], '%addr'))
+        with self.assertRaisesRegex(ValueError, '实例地址'):
+            material_reads(instance_ir(['%base = shl i32 %instance, 2'], '%base'))
+        with self.assertRaisesRegex(ValueError, '步长与原参数区'):
+            relocate_material_reads(instance_ir(['%base = shl i32 %instance, 10'], '%base'), SHL_OLD, SHL_NEW)
+
+    def test_constant_instance_address_is_instance_zero_without_rewrite(self):
+        ir = instance_ir([], '448')
+        read, = material_reads(ir)
+        self.assertEqual((read['kind'], read['stride'], read['address_ssa']), ('instance', None, None))
+        self.assertEqual([ex['offset'] for ex in read['extracts']], [452])
+        updated, report = relocate_material_reads(ir, SHL_OLD, SHL_NEW)
+        self.assertEqual(updated, ir)
+        self.assertEqual(report['instance_stride_ssa'], [])
+
+    def test_constant_address_outside_parameters_or_unaligned_rejected(self):
+        with self.assertRaisesRegex(ValueError, '实例编号'):
+            relocate_material_reads(instance_ir([], '512'), SHL_OLD, SHL_NEW)
+        with self.assertRaisesRegex(ValueError, '未知材质读取'):
+            material_reads(instance_ir([], '452'))
+        bindless = instance_ir([], '448').replace('UserMaterialInstances', 'BindlessBuffer')
+        with self.assertRaisesRegex(ValueError, '未知材质读取'):
+            material_reads(bindless)
+
+
 @unittest.skipUnless((ROOT/'output/pants-interface-test-v2-20261019/manifest.json').is_file(), 'Pants v2 local candidate unavailable')
 class PantsCandidateAddressesTests(unittest.TestCase):
     def test_every_original_scalar_reads_same_field_in_compiled_candidate(self):
