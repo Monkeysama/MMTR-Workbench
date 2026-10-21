@@ -40,12 +40,15 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 26)
+        self.assertEqual(len(tools), 30)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_material_status'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_submit'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_cancel'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_variant_export'].annotations.open_world_hint)
+        self.assertFalse(tools['workbench_project_save'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_project_read'].annotations.read_only_hint)
         self.assertIn('discriminator', tools['workbench_material_preview'].input_schema['properties']['actions']['items'])
         self.assertFalse(tools['workbench_export'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_reset'].annotations.destructive_hint)
@@ -55,6 +58,37 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
         self.assertEqual(tools['workbench_redirect'].input_schema['properties']['field']['type'], 'integer')
+
+    async def test_project_tools_keep_source_and_revision_and_restore_only_intent(self):
+        from mmtr_editor.model import Document
+        folder = self.root/'MaterialShader'
+        folder.mkdir()
+        source = folder/'test.mmtr.240906211'
+        source.write_bytes(mmtr_fixture())
+        self.state.service.doc = Document(source.read_bytes(), source)
+        self.state.service.mdf_selected = 0
+        dll = self.root/'identity.dll'
+        dll.write_bytes(b'not loaded; identity only')
+        self.state.dll = str(dll)
+        actions = [{'action': 'parameter', 'name': 'IntentP', 'byte_size': 4}]
+        variant = dict(master='MaterialShader/independent.mmtr', mmtr_path=str(folder/'independent.mmtr.240906211'),
+                       mdf_path=str(self.root/'independent.mdf2.45'))
+        revision = self.state.revision
+        path = str(self.root/'intent.mmtrproj.json')
+        await self.call('project_save', path=path, actions=actions, record_index=0, variant=variant)
+        read = await self.call('project_read', path=path)
+        self.assertEqual(read['changed_inputs'], [])
+        self.assertTrue(read['requires_replan'])
+        self.assertFalse(read['can_execute_saved_plan'])
+        self.assertEqual(self.state.revision, revision)
+        self.assertFalse((folder/'independent.mmtr.240906211').exists())
+        preview = await self.call('material_preview', actions=read['project']['request']['actions'],
+            record_index=0, variant=read['project']['request']['variant'])
+        self.assertEqual(preview['scope'], 'independent_variant')
+        self.assertEqual(preview['target_materials'], [0])
+        self.assertEqual(len(preview['known_users']), 2)
+        with self.assertRaises(ToolError):
+            await self.call('variant_export', job_id='missing')
 
     async def test_material_jobs_short_calls_and_error_leave_revision_unchanged(self):
         from threading import Event

@@ -108,6 +108,15 @@ MaterialAction = Annotated[ParameterAddition | TextureAddition, Field(discrimina
 MaterialActions = Annotated[list[MaterialAction], Field(min_length=1, max_length=100)]
 
 
+class VariantOptions(BaseModel):
+    """独立候选的显式输出范围；计算不写文件，导出仍需另一个工具调用。"""
+    model_config = ConfigDict(extra='forbid')
+    master: Name
+    mmtr_path: str
+    mdf_path: str
+    overwrite: bool = False
+
+
 # 所有 SDK 工作线程串行访问同一 Service；锁不交给 deepcopy，事务失败恢复整个文档状态。
 class WorkbenchSession:
     def __init__(self):
@@ -160,7 +169,8 @@ class WorkbenchSession:
                   'session': 'independent_process', 'transport': 'stdio',
                   'capabilities': ['paged_queries', 'shader_compile_replace', 'mdf_batch_edit',
                                    'auto_parameter_texture_extension', 'mdf_master_edit', 'validated_export',
-                                   'readonly_structure', 'material_input_usage', 'material_batch_jobs'],
+                                   'readonly_structure', 'material_input_usage', 'material_batch_jobs',
+                                   'independent_material_variant', 'material_project'],
                   'mmtr': None, 'mdf': None, 'compiled_size': len(service.compiled or b'')}
         if service.doc:
             doc = service.doc
@@ -220,17 +230,21 @@ def create_server(session=None):
         return decorate
 
     @tool(job=True)
-    def workbench_material_preview(actions: MaterialActions, record_index: Index | None = None) -> dict[str, Any]:
+    def workbench_material_preview(actions: MaterialActions, record_index: Index | None = None,
+                                    variant: VariantOptions | None = None) -> dict[str, Any]:
         """预览混合参数/贴图批次及关联材质；不编译。提交时使用返回的 digest。"""
-        return state.jobs.preview([a.model_dump(exclude_none=True) for a in actions], record_index)
+        return state.jobs.preview([a.model_dump(exclude_none=True) for a in actions], record_index,
+                                  variant=variant.model_dump() if variant is not None else None)
 
     @tool(job=True, job_write=True)
     def workbench_material_submit(actions: MaterialActions, expected_plan: str,
                                   request_key: Annotated[str, Field(min_length=1, max_length=128)],
-                                  record_index: Index | None = None) -> dict[str, Any]:
+                                  record_index: Index | None = None,
+                                  variant: VariantOptions | None = None) -> dict[str, Any]:
         """短调用提交后台批次；超时重试必须沿用相同 request_key、动作及计划，防止重复新增。"""
         return state.jobs.submit([a.model_dump(exclude_none=True) for a in actions], record_index,
-                                  expected_plan, request_key)
+                                  expected_plan, request_key,
+                                  variant=variant.model_dump() if variant is not None else None)
 
     @tool(job=True)
     def workbench_material_status(job_id: str) -> dict[str, Any]:
@@ -246,6 +260,30 @@ def create_server(session=None):
     def workbench_material_result(job_id: str, offset: Index = 0, limit: Limit = 40) -> dict[str, Any]:
         """分页读取成功批次的验证结果；Shader 报告分页，文档二进制不会返回。"""
         return state.jobs.result(job_id, offset, limit)
+
+    @tool(job=True, job_write=True, files=True)
+    def workbench_variant_export(job_id: str) -> dict[str, Any]:
+        """显式导出任务中的独立候选对；目标已绑定计划，源状态保留，不自动安装或打开。"""
+        return state.jobs.export_variant(job_id)
+
+    @tool(job=True, job_write=True)
+    def workbench_variant_discard(job_id: str) -> dict[str, Any]:
+        """丢弃已完成变体任务的内存候选，保留原文档；运行中的任务用 material_cancel。"""
+        return state.jobs.discard_variant(job_id)
+
+    @tool(files=True)
+    def workbench_project_save(path: str, actions: MaterialActions, record_index: Index | None = None,
+                               variant: VariantOptions | None = None, overwrite: bool = False) -> dict[str, Any]:
+        """保存不含游戏载荷的 .mmtrproj.json；源必须可从磁盘重开，工程不自动执行。"""
+        from .material_project import save_project
+        return save_project(state, path, [a.model_dump(exclude_none=True) for a in actions], record_index,
+                            variant=variant.model_dump() if variant is not None else None, overwrite=overwrite)
+
+    @tool()
+    def workbench_project_read(path: str) -> dict[str, Any]:
+        """只读工程意图并与当前源/材质比较；输入变化需重新预览，不返回可执行的旧计划。"""
+        from .material_project import read_project
+        return read_project(state, path)
 
     @tool()
     def workbench_status() -> dict[str, Any]:

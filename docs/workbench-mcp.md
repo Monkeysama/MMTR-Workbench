@@ -52,6 +52,10 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_material_status`|查询任务状态、阶段、数量和错误，不重建文档|
 |`workbench_material_cancel`|取消未提交候选并回收本任务的 DXC 子进程|
 |`workbench_material_result`|分页读取成功批次的验证和 Shader 修改报告|
+|`workbench_variant_export`|显式导出已验证的独立变体 MMTR/MDF 候选对|
+|`workbench_variant_discard`|释放已结束任务的独立变体候选|
+|`workbench_project_save`|保存源指纹、材质身份、动作、默认值及目标路径的轻量工程|
+|`workbench_project_read`|对照当前已打开的源恢复工程意图，始终要求重新规划|
 |`workbench_set_master`|显式修改指定材质的 MMTR 相对路径，只影响该材质|
 |`workbench_edit_mdf`|一个事务内批量修改、增删 MDF 参数/纹理及修改设置/标记|
 |`workbench_validate`|DXIL/metadata/材质布局验证，分页返回问题|
@@ -59,6 +63,34 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_reset`|丢弃 MMTR/MDF 内存编辑，恢复打开时原字节|
 
 工具 schema 包含完整参数和枚举。MDF 批量动作采用 `action` 区分类型：`set_property`、`set_property_components`、`add_property`、`delete_property`、`set_texture`、`add_texture`、`delete_texture`、`set_setting`、`set_flags`、`set_master`。每项明确指定 `material_index`；最多 100 项，整批失败则恢复全部内存修改。`set_setting` 支持 shader_type、shader_lod、bake_texture_array_size；master 使用专用 `workbench_set_master` 或批次 `set_master` 动作。
+
+### 独立变体与工程
+
+`workbench_material_preview` 和 `workbench_material_submit` 不传 `variant` 时仍同步当前 MDF 全部已知关联材质。需要只修改所选材质时，两次调用传入相同的 `variant`：
+
+```json
+{
+  "actions": [
+    {"action":"parameter","name":"ExampleP","byte_size":8,"values":[0,0]},
+    {"action":"texture","name":"ExampleMap","path":"systems/rendering/NullBlack.tex"}
+  ],
+  "record_index": 130,
+  "variant": {
+    "master":"MaterialShader/Variation/example.mmtr",
+    "mmtr_path":"D:/Mod/natives/STM/MaterialShader/Variation/example.mmtr.240906211",
+    "mdf_path":"D:/Mod/variant.mdf2.45",
+    "overwrite":false
+  }
+}
+```
+
+路径和记录索引必须换成实际输入。目录须已存在，MMTR 输出须保留 master 的完整资源目录及源数字版本，不能只改文件名。预览返回 `scope`、`selected_material`、`known_users`、`target_materials` 和未扫描的外部范围；独立模式只同步所选材质，其它材质保持。
+
+提交时照常附上预览的 `digest` 作为 `expected_plan` 及唯一 `request_key`。独立任务 `succeeded/stage=candidate_ready` 表示已验证的候选可用，当前 MMTR/MDF 和 revision 保持不变，也没有写出文件。取得报告后，显式调用 `workbench_variant_export({"job_id":"…"})` 写出候选对，或调用 `workbench_variant_discard` 丢弃。每会话最多保留一份候选；导出/丢弃后才能提交下一批次。重复导出同一任务只返回收据，不再次写入。源、DXC 或目标在规划后变化时拒绝导出；普通写失败回滚不保证跨文件进程崩溃原子性。
+
+`workbench_project_save` 接受 `path`、相同的 `actions/record_index/variant` 和可选 `overwrite`，文件以 `.mmtrproj.json` 结尾。工程保存 schema、源及 DXC 内容指纹、材质身份、动作/默认值和目标；不保存资产、IR、旧偏移或可执行计划。源必须已另存且可从磁盘重开，有未保存编辑时应先另存并打开新源。
+
+重开相同 MMTR/MDF 并选择相同材质、配置 DXC 后，`workbench_project_read({"path":"D:/Mod/material.mmtrproj.json"})` 返回 `project.request`、`changed_inputs` 和 `requires_replan=true`；它不自动打开引用或执行工程。恢复意图后重新 preview/submit，不能复用旧 digest。见[设计与验证](material-variants.md)。
 
 ### 只读结构预检
 

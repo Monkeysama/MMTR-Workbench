@@ -44,6 +44,9 @@ class _Job:
     details: dict | None = None
     committed_revision: int | None = None
     thread: Thread | None = None
+    variant_plan: object | None = None
+    variant_candidate: object | None = None
+    exported: dict | None = None
 
 
 class MaterialJobs:
@@ -56,19 +59,39 @@ class MaterialJobs:
         self.history_limit = history_limit
         self.closed = False
 
-    def preview(self, actions, record_index=None):
+    def _prepare(self, service, dll, actions, record_index, revision, variant):
+        if variant is None:
+            plan = prepare_material_batch(service, dll, actions, record_index, revision)[0]
+            return plan, {**plan.report(), 'scope': 'shared_master', 'selected_material': service.mdf_selected,
+                          'known_users': [[i, service.mdf.material(i)['name'], service.mdf.material(i)['master']]
+                                          for i in plan.target_materials], 'external_users': 'not_scanned'}
+        from .material_variant import prepare_material_variant
+        if (not isinstance(variant, dict) or set(variant)-{'mmtr_path', 'mdf_path', 'master', 'overwrite'}
+                or not {'mmtr_path', 'mdf_path', 'master'} <= set(variant)
+                or type(variant.get('overwrite', False)) is not bool):
+            raise EditError('变体需要 mmtr_path、mdf_path、master 和可选布尔 overwrite。')
+        plan = prepare_material_variant(service, dll, actions, record_index,
+            variant['mmtr_path'], variant['mdf_path'], variant['master'], revision,
+            overwrite=variant.get('overwrite', False))
+        return plan, {**plan.edit.report(), 'digest': plan.digest, 'scope': 'independent_variant',
+                      'selected_material': plan.selected_material, 'known_users': plan.known_users,
+                      'external_users': 'not_scanned',
+                      'variant': plan.report()}
+
+    def preview(self, actions, record_index=None, *, variant=None):
         with self.owner.lock:
-            return prepare_material_batch(self.owner.service, self.owner.dll, actions, record_index,
-                                          self.owner.revision)[0].report()
+            return self._prepare(self.owner.service, self.owner.dll, actions, record_index,
+                                 self.owner.revision, variant)[1]
 
     # 先核对幂等键，再检查当前源；成功后重试不会因新增名称已存在而重新执行。
-    def submit(self, actions, record_index, expected_plan, request_key):
+    def submit(self, actions, record_index, expected_plan, request_key, *, variant=None):
         if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128 or not request_key.strip():
             raise EditError('request_key 必须是 1..128 字符的非空字符串。')
         if not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan):
             raise EditError('expected_plan 必须是预览返回的计划 digest。')
         try:
-            encoded = json.dumps(dict(actions=actions, record_index=record_index, expected_plan=expected_plan),
+            encoded = json.dumps(dict(actions=actions, record_index=record_index, expected_plan=expected_plan,
+                                      variant=variant),
                                  sort_keys=True, ensure_ascii=True, allow_nan=False)
             request = json.loads(encoded)  # 调用方之后改动列表不能改变本次请求。
         except (TypeError, ValueError) as exc:
@@ -86,16 +109,20 @@ class MaterialJobs:
                     return self._status(job)
                 if any(job.state not in TERMINAL for job in self.jobs.values()):
                     raise EditError('当前会话已有运行中的材质批次，请等待完成或取消。')
+                if any(job.variant_candidate is not None for job in self.jobs.values()):
+                    raise EditError('请先导出或丢弃已有变体候选，再开始下一批次。')
                 if len(self.jobs) >= self.history_limit:
                     raise EditError('会话任务历史已满；请另开会话，不会淘汰旧请求键后重复执行。')
             candidate = deepcopy(self.owner.service)
             dll = self.owner.dll
-            plan = prepare_material_batch(candidate, dll, request['actions'], record_index, self.owner.revision)[0]
-            if plan.digest != expected_plan:
+            plan, report = self._prepare(candidate, dll, request['actions'], record_index,
+                                         self.owner.revision, request['variant'])
+            if report['digest'] != expected_plan:
                 raise EditError('计划身份已改变，必须重新预览。')
             source = (str(candidate.doc.source), str(candidate.mdf.source), candidate.mdf_selected, str(dll))
             control = WorkerControl()
-            job = _Job(request_key, identity, plan.report(), control)
+            job = _Job(request_key, identity, report, control,
+                       variant_plan=plan if request['variant'] is not None else None)
             control.progress = lambda **values: self._progress(job, **values)
             job.thread = Thread(target=self._run, args=(job, candidate, dll, request, source),
                                 name='mmtr-material-'+job.id[:8], daemon=True)
@@ -126,8 +153,15 @@ class MaterialJobs:
             with self.lock:
                 job.control.check()
                 job.state, job.stage = 'running', 'preparing'
-            result = apply_material_batch(candidate, dll, request['actions'], request['record_index'],
-                job.plan['source_revision'], expected_plan=job.plan['digest'], worker_control=job.control)
+            variant_candidate = None
+            if job.variant_plan is not None:
+                from .material_variant import build_material_variant
+                variant_candidate = build_material_variant(candidate, dll, request['actions'],
+                    request['record_index'], job.variant_plan, worker_control=job.control)
+                result = {**variant_candidate.report, 'plan': job.plan, 'scope': 'independent_variant'}
+            else:
+                result = apply_material_batch(candidate, dll, request['actions'], request['record_index'],
+                    job.plan['source_revision'], expected_plan=job.plan['digest'], worker_control=job.control)
             job.control.check()
             self._progress(job, stage='committing')
             with self.owner.lock:
@@ -140,15 +174,18 @@ class MaterialJobs:
                     raise _StaleCandidate('源文档、所选材质或 DXC 已改变，候选已丢弃；请重新预览。')
                 with self.lock:
                     job.control.check()
-                    service.doc, service.mdf = candidate.doc, candidate.mdf
-                    service.mdf_link_doc = service.mdf_link_report = service.mdf_migration = None
-                    self.owner.revision += 1
-                    invalidate = getattr(self.owner, 'invalidate', None)
-                    if invalidate is not None:
-                        invalidate()
+                    if variant_candidate is None:
+                        service.doc, service.mdf = candidate.doc, candidate.mdf
+                        service.mdf_link_doc = service.mdf_link_report = service.mdf_migration = None
+                        self.owner.revision += 1
+                        invalidate = getattr(self.owner, 'invalidate', None)
+                        if invalidate is not None:
+                            invalidate()
+                    job.variant_candidate = variant_candidate
                     job.committed_revision = self.owner.revision
                     job.result = result
-                    job.state, job.stage = 'succeeded', 'complete'
+                    job.state = 'succeeded'
+                    job.stage = 'candidate_ready' if variant_candidate is not None else 'complete'
                     job.completed = job.total = 1
                     job.ended = time.monotonic()
         except Exception as exc:
@@ -168,7 +205,48 @@ class MaterialJobs:
         return dict(job_id=job.id, request_key=job.key, plan_digest=job.plan['digest'], state=job.state,
             stage=job.stage, completed=job.completed, total=job.total, worker_pid=job.worker_pid,
             elapsed_seconds=(job.ended or time.monotonic())-job.started, source_revision=job.plan['source_revision'],
-            committed_revision=job.committed_revision, error=job.error, details=job.details)
+            committed_revision=job.committed_revision, error=job.error, details=job.details,
+            scope='independent_variant' if job.variant_plan is not None else 'shared_master',
+            candidate_available=job.variant_candidate is not None, exported=job.exported is not None)
+
+    # 导出只在调用方显式请求后执行；候选最多保留一份，不将二进制塞进历史/协议结果。
+    def export_variant(self, job_id):
+        from .material_variant import export_material_variant
+        with self.owner.lock:
+            with self.lock:
+                job = self._get(job_id)
+                if job.exported is not None:
+                    return deepcopy(job.exported)
+                if job.state != 'succeeded' or job.variant_candidate is None:
+                    raise EditError('任务没有可导出的独立变体候选。')
+                if self.owner.revision != job.plan['source_revision']:
+                    job.variant_candidate = None
+                    job.state, job.stage = 'stale', 'source_changed'
+                    job.error = '源 revision 已改变，变体必须重新规划。'
+                    raise EditError(job.error)
+                candidate = job.variant_candidate
+                job.stage = 'exporting'
+            try:
+                exported = export_material_variant(self.owner.service, self.owner.dll, candidate)
+            except Exception:
+                with self.lock:
+                    job.stage = 'candidate_ready'
+                raise
+            with self.lock:
+                job.exported = exported
+                job.variant_candidate = None
+                job.stage = 'exported'
+                return deepcopy(exported)
+
+    def discard_variant(self, job_id):
+        with self.owner.lock, self.lock:
+            job = self._get(job_id)
+            if job.variant_plan is None or job.state not in TERMINAL:
+                raise EditError('只可丢弃已结束任务的独立变体候选；运行中的任务请取消。')
+            job.variant_candidate = None
+            if job.exported is None:
+                job.stage = 'discarded'
+            return self._status(job)
 
     def status(self, job_id):
         with self.lock:
@@ -210,3 +288,6 @@ class MaterialJobs:
                     threads.append(job.thread)
         for thread in threads:
             thread.join()
+        with self.lock:
+            for job in self.jobs.values():
+                job.variant_candidate = None

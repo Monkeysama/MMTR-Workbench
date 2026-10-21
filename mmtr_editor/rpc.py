@@ -467,15 +467,26 @@ class RpcSession:
             return self.jobs.cancel(request['job_id'])
         if op == 'material_job_result':
             return self.jobs.result(request['job_id'], request.get('offset', 0), request.get('limit', 40))
+        if op == 'material_variant_export':
+            return self.jobs.export_variant(request['job_id'])
+        if op == 'material_variant_discard':
+            return self.jobs.discard_variant(request['job_id'])
         with self.lock:
             if 'dll' in request and request['dll'] != self.dll:
                 self.dll = request['dll']
                 self.revision += 1
             if op == 'material_job_preview':
-                return self.jobs.preview(request.get('actions'), request.get('record_index'))
+                return self.jobs.preview(request.get('actions'), request.get('record_index'), variant=request.get('variant'))
             if op == 'material_job_submit':
                 return self.jobs.submit(request.get('actions'), request.get('record_index'),
-                                        request.get('expected_plan'), request.get('request_key'))
+                                        request.get('expected_plan'), request.get('request_key'), variant=request.get('variant'))
+            if op == 'material_project_save':
+                from .material_project import save_project
+                return save_project(self, request['path'], request.get('actions'), request.get('record_index'),
+                                    variant=request.get('variant'), overwrite=request.get('overwrite', False))
+            if op == 'material_project_read':
+                from .material_project import read_project
+                return read_project(self, request['path'])
             if op in ('material_plan', 'material_apply'):
                 request = {**request, 'source_revision': self.revision}
             try:

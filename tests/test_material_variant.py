@@ -169,3 +169,44 @@ class NativeVariantTests(unittest.TestCase):
                 self.build()
         self.assertEqual(self.before, (self.service.doc.build()[0], self.service.mdf.build()[0]))
         self.assertFalse(self.mmtr.exists())
+
+    def test_background_candidate_explicit_export_retry_discard_and_stale_revision(self):
+        import time
+        from threading import RLock
+        from types import SimpleNamespace
+        from mmtr_editor.material_jobs import MaterialJobs, TERMINAL
+        owner = SimpleNamespace(service=self.service, lock=RLock(), revision=0, dll=str(NATIVE_DXC))
+        jobs = MaterialJobs(owner)
+        self.addCleanup(jobs.close)
+        variant = dict(master=self.master, mmtr_path=str(self.mmtr), mdf_path=str(self.mdf))
+        plan = jobs.preview(self.actions, 0, variant=variant)
+        job = jobs.submit(self.actions, 0, plan['digest'], 'candidate', variant=variant)
+        deadline = time.monotonic()+10
+        while jobs.status(job['job_id'])['state'] not in TERMINAL and time.monotonic() < deadline:
+            time.sleep(.01)
+        status = jobs.status(job['job_id'])
+        self.assertEqual(status['state'], 'succeeded', status)
+        self.assertTrue(status['candidate_available'])
+        self.assertEqual(status['stage'], 'candidate_ready')
+        self.assertEqual(owner.revision, 0)
+        self.assertFalse(self.mmtr.exists())
+        self.assertEqual(jobs.submit(self.actions, 0, plan['digest'], 'candidate', variant=variant)['job_id'], job['job_id'])
+        with self.assertRaisesRegex(EditError, '导出或丢弃'):
+            jobs.submit(self.actions, 0, plan['digest'], 'other', variant=variant)
+        result = jobs.export_variant(job['job_id'])
+        self.assertEqual(jobs.export_variant(job['job_id']), result)
+        self.assertFalse(jobs.status(job['job_id'])['candidate_available'])
+        self.assertEqual(jobs.status(job['job_id'])['stage'], 'exported')
+        self.mmtr.unlink()
+        self.mdf.unlink()
+        next_job = jobs.submit(self.actions, 0, plan['digest'], 'stale', variant=variant)
+        deadline = time.monotonic()+10
+        while jobs.status(next_job['job_id'])['state'] not in TERMINAL and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(jobs.status(next_job['job_id'])['state'], 'succeeded')
+        owner.revision += 1
+        with self.assertRaisesRegex(EditError, '重新规划'):
+            jobs.export_variant(next_job['job_id'])
+        self.assertFalse(self.mmtr.exists())
+        jobs.discard_variant(next_job['job_id'])
+        self.assertEqual(self.before, (self.service.doc.build()[0], self.service.mdf.build()[0]))
