@@ -13,7 +13,7 @@ from .model import Document, EditError
 
 
 # 先用重开的当前字节严格证明所有关联材质，防止旧单项未同步状态被批次静默继承。
-def prepare_material_batch(service, dll, actions, record_index=None, source_revision=0):
+def prepare_material_batch(service, dll, actions, record_index=None, source_revision=0, *, variant_master=None):
     if service.doc is None or service.mdf is None:
         raise EditError('批量扩展需要先打开 MMTR 与关联 MDF。')
     if type(source_revision) is not int or source_revision < 0:
@@ -25,19 +25,28 @@ def prepare_material_batch(service, dll, actions, record_index=None, source_revi
     linked = [m for m in snapshot.materials if master_matches(m['master'], str(doc.source))]
     if not linked or service.mdf_selected not in [m['index'] for m in linked]:
         raise EditError('所选 MDF 材质未关联当前 MMTR。')
+    if variant_master is not None:
+        from .material_variant import validate_variant_master
+        validate_variant_master(variant_master)
+        if any(master_matches(variant_master, m['master']) for m in snapshot.materials):
+            raise EditError('独立变体不能复用当前 MDF 中已使用的 master。')
+        linked = [m for m in linked if m['index'] == service.mdf_selected]
     layouts = [current_layout(strict, m) for m in linked]
     if any(layout != layouts[0] for layout in layouts):
         raise EditError('多个关联材质的纹理/GPBF布局不同，不能共用一次接口扩展。')
     material = next(m for m in linked if m['index'] == service.mdf_selected)
     context = {'source_revision': source_revision, 'mdf_sha256': hashlib.sha256(mdf_bytes).hexdigest(),
                'target_materials': tuple(m['index'] for m in linked)}
+    if variant_master is not None:
+        context['variant_master'] = variant_master
     return plan_material_edit(doc, material, dll, actions, record_index, **context), material, context
 
 
 # 全批次只处理一个候选 MMTR/MDF；MDF 提前预构建，坏默认值或结构错误不浪费 DXC 工作。
 def apply_material_batch(service, dll, actions, record_index=None, source_revision=0, expected_plan=None,
-                         worker_control=None):
-    plan, material, context = prepare_material_batch(service, dll, actions, record_index, source_revision)
+                         worker_control=None, *, variant_master=None):
+    plan, material, context = prepare_material_batch(service, dll, actions, record_index, source_revision,
+                                                      variant_master=variant_master)
     if expected_plan is not None and plan.digest != expected_plan:
         raise EditError('计划身份已改变，必须重新规划。')
     candidate_doc, candidate_mdf = copy.deepcopy(service.doc), copy.deepcopy(service.mdf)
@@ -46,6 +55,8 @@ def apply_material_batch(service, dll, actions, record_index=None, source_revisi
             candidate_mdf.add_property(index, parameter.name, list(parameter.values), offset=parameter.byte_offset)
         for texture in plan.textures:
             candidate_mdf.add_texture(index, texture.name, texture.path)
+        if variant_master is not None:
+            candidate_mdf.set_master(index, variant_master)
     mdf_bytes = candidate_mdf.build()[0]
     reopened_mdf = MdfDocument(mdf_bytes, candidate_mdf.source)
     control = {'worker_control': worker_control} if worker_control is not None else {}

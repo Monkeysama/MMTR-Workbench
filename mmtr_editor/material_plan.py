@@ -49,6 +49,7 @@ class MaterialEditPlan:
     tables: tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
     texture_shaders: tuple[int, ...]
     shader_candidates: tuple[int, ...]
+    variant_master: str | None = None
 
     @property
     def digest(self):
@@ -66,7 +67,7 @@ def dll_identity(dll):
 
 # 完整读取已支持的材质布局；纹理批次共享同一个绘制记录范围，不创造新阶段/资源类型。
 def plan_material_edit(document, material, dll, actions, record_index=None, *, source_revision=0,
-                       mdf_sha256=None, target_materials=()):
+                       mdf_sha256=None, target_materials=(), variant_master=None):
     from .material_extension import current_layout, texture_tables
     if not isinstance(actions, list) or not 1 <= len(actions) <= 100:
         raise EditError('批次需要 1..100 个参数/纹理动作。')
@@ -134,4 +135,4 @@ def plan_material_edit(document, material, dll, actions, record_index=None, *, s
     return MaterialEditPlan(hashlib.sha256(document.build()[0]).hexdigest(), source_revision, mdf_sha256,
         dll_identity(dll), old, new, tuple(parameters), tuple(textures), tuple(order), tuple(target_materials),
         tuple((offsets, tuple(records)) for offsets, records in tables.items()), tuple(sorted(texture_shaders)),
-        tuple(s['index'] for s in info['shaders']))
+        tuple(s['index'] for s in info['shaders']), variant_master)
