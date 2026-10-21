@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElDialog, ElTag } from "element-plus";
-import type { MaterialJob } from "../../materialBatch";
+import { materialJobStageLabels, type MaterialJob } from "../../materialBatch";
 import type { RemovalAction } from "../../composables/useMaterialRemoval";
 
 const props = defineProps<{
@@ -32,7 +32,7 @@ const emit = defineEmits<{
       <p>先分析关联 Shader 的消费者。只有本档可完整证明没有消费者时，才允许继续；提交会同步 MMTR、关联 MDF 并重编译验证候选。</p>
       <ElAlert v-if="job && !loading && !error" :type="eligible ? 'success' : 'warning'" :closable="false"
         :title="eligible ? '消费者证明通过，可生成并验证删除候选' : '尚未获得可删除证明'" />
-      <ElAlert v-if="job && working" type="info" :closable="false" :title="`任务进行中：${job.stage}（${job.completed}/${job.total}）`" />
+      <ElAlert v-if="job && working" type="info" :closable="false" :title="`任务进行中：${materialJobStageLabels[job.stage] ?? job.stage}（${job.completed}/${job.total}）`" />
       <ElAlert v-if="error" type="error" :closable="false" :title="error" />
       <div v-if="job?.state === 'succeeded' && eligible" class="proof-row">
         <ElTag type="success">覆盖内无消费者</ElTag>

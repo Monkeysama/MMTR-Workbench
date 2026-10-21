@@ -29,6 +29,13 @@ export interface Metadata {
   byteOffset: number | null;
   size: number | null;
 }
+// 当前文档的接口检查结果；重新加载或修改 MMTR 后必须失效。
+export interface InterfaceValidation {
+  state: "passed" | "failed" | "clean";
+  checkedShaders: number;
+  metadataEdits: number;
+  issues: Array<{ kind: string; shader_index?: number; record_index?: number; name?: string; problem?: string }>;
+}
 export interface Integrity {
   name_records_checked: number;
   name_hash_mismatches: number[];

@@ -5,7 +5,7 @@ import { Trash2 } from "lucide-vue-next";
 import type { MdfMaterial, MdfProperty } from "../../types";
 import MdfAutoInput from "./MdfAutoInput.vue";
 import MdfPropertyEditor from "./MdfPropertyEditor.vue";
-const props = defineProps<{ material: MdfMaterial; busy: boolean; mmtrLoaded: boolean }>();
+const props = defineProps<{ material: MdfMaterial; busy: boolean; mmtrLoaded: boolean; canAddInterfaces: boolean }>();
 const emit = defineEmits<{
   link: [];
   edit: [name: string, components: Record<number, number>];
@@ -53,8 +53,8 @@ watch(() => ({
     <div class="mdf-toolbar">
       <ElInput v-model="query" class="mdf-filter" size="small" clearable placeholder="搜索参数或纹理" aria-label="搜索参数或纹理" />
       <span class="secondary-text">失焦 / Enter 自动暂存 · Esc 取消当前输入</span>
-      <ElButton size="small" :disabled="busy" @click="emit('add-property')">新增参数</ElButton>
-      <ElButton size="small" :disabled="busy" @click="emit('add-texture')">新增纹理槽</ElButton>
+      <ElTooltip :content="canAddInterfaces ? '从当前关联 MMTR 选择接口' : '请先打开对应 MMTR 并确认当前材质已关联'"><span><ElButton size="small" :disabled="busy || !canAddInterfaces" @click="emit('add-property')">新增参数</ElButton></span></ElTooltip>
+      <ElTooltip :content="canAddInterfaces ? '从当前关联 MMTR 选择接口' : '请先打开对应 MMTR 并确认当前材质已关联'"><span><ElButton size="small" :disabled="busy || !canAddInterfaces" @click="emit('add-texture')">新增纹理槽</ElButton></span></ElTooltip>
       <ElButton v-if="mmtrLoaded" :disabled="busy" size="small" @click="emit('link')">检查绑定</ElButton>
     </div>
     <ElTabs v-model="section" class="mdf-data-tabs">

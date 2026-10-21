@@ -32,6 +32,8 @@ function remove(id: number) { emit("update:rows", props.rows.filter(row => row.i
     <div class="batch-content">
       <MaterialTargetForm :mode="mode" :variant="variant" :disabled="working"
         @update:mode="emit('update:mode', $event)" @update:variant="emit('update:variant', $event)" @choose="emit('choose', $event)" />
+      <ElAlert v-if="mode === 'independent_variant' && candidate" type="success" :closable="false"
+        title="候选已验证，尚未导出。导出后才会写入所选的 MMTR 与 MDF 路径。" />
       <div class="batch-actions">
         <ElButton :disabled="working || rows.length >= 100" @click="emit('add', 'parameter')">添加参数</ElButton>
         <ElButton :disabled="working || rows.length >= 100" @click="emit('add', 'texture')">添加贴图</ElButton>
@@ -53,7 +55,7 @@ function remove(id: number) { emit("update:rows", props.rows.filter(row => row.i
         <div v-for="item in plan.parameters" :key="item.name">{{ item.name }} · 偏移 {{ item.byte_offset }} · {{ item.byte_size }} B</div>
       </section>
       <MaterialJobPanel v-if="job" :job="job" @cancel="emit('cancel')" />
-      <ElAlert v-if="notice" type="info" :title="notice" :closable="false" />
+      <ElAlert v-if="notice && !(mode === 'independent_variant' && candidate)" type="info" :title="notice" :closable="false" />
       <ElAlert v-if="error" type="error" :title="error" :closable="false" />
     </div>
     <template #footer>

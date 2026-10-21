@@ -93,7 +93,7 @@ function navigate(id: string) {
         <div class="brand">
           <Layers3 :size="26" />
           <div><b>MMTR</b><span>Workbench</span></div>
-          <span class="version">{{ appVersion }}</span>
+          <span class="version">v{{ appVersion }}</span>
         </div>
         <div class="sidebar-caption">工作空间</div>
         <ElMenu class="workspace-menu" :default-active="tab" @select="navigate">
@@ -237,9 +237,11 @@ function navigate(id: string) {
             v-else-if="doc && tab === 'metadata'"
             :doc="doc"
             :busy="busy"
+            :batch-enabled="wb.canAddMaterialInterfaces.value"
+            :validation="wb.interfaceValidation.value"
+            :validating="wb.validatingInterfaces.value"
             @rename="wb.rename"
-            @add="wb.addMmtrParameter"
-            @batch="wb.materialBatch.open()"
+            @batch="wb.materialBatch.open($event)"
             @remove="wb.deleteMmtrParameter"
             @safe-remove="wb.removeMmtrInterface"
             @add-resource="wb.addMmtrResource"

@@ -49,7 +49,7 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
         <div class="mdf-master" :title="doc.selected.master"><span>MMTR</span><span class="mono">{{ doc.selected.master }}</span></div>
         <ElTabs v-model="detailTab" class="mdf-detail-tabs">
           <ElTabPane label="材质输入" name="inputs">
-            <MdfMaterialInputs :material="doc.selected" :busy="busy" :mmtr-loaded="mmtrLoaded" @link="inspectBinding" @edit="(name, components) => emit('edit', name, components)" @texture="(slot, path) => emit('texture', slot, path)" @add-property="emit('add-property')" @delete-property="(name) => emit('delete-property', name)" @add-texture="emit('add-texture')" @delete-texture="(slot) => emit('delete-texture', slot)" />
+            <MdfMaterialInputs :material="doc.selected" :busy="busy" :mmtr-loaded="mmtrLoaded" :can-add-interfaces="mmtrLoaded && doc.selected.mmtr_linked === true" @link="inspectBinding" @edit="(name, components) => emit('edit', name, components)" @texture="(slot, path) => emit('texture', slot, path)" @add-property="emit('add-property')" @delete-property="(name) => emit('delete-property', name)" @add-texture="emit('add-texture')" @delete-texture="(slot) => emit('delete-texture', slot)" />
           </ElTabPane>
           <ElTabPane label="材质设置 · 标记" name="settings">
             <MdfMaterialSettings :key="doc.selected.index" :material="doc.selected" :busy="busy" @setting="(field, value) => emit('setting', field, value)" />

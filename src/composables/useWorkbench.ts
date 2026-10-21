@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, reactive, shallowRef } from "vue";
+import { computed, onMounted, onUnmounted, reactive, shallowRef, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { request, isDesktop } from "../api";
 import { droppedDocuments, useDocumentDrop } from "./useDocumentDrop";
@@ -10,6 +10,7 @@ import {
   type CompileResult,
   type DialogState,
   type DocumentInfo,
+  type InterfaceValidation,
   type Metadata,
   type MdfDocument,
   type MdfSetting,
@@ -20,7 +21,11 @@ import {
 } from "../types";
 
 export function useWorkbench() {
+  const interfaceValidation = shallowRef<InterfaceValidation | null>(null);
+  const validatingInterfaces = shallowRef(false);
   const doc = shallowRef<DocumentInfo | null>(null);
+  // 文档快照替换后立即撤销旧报告，覆盖追加、删除、Shader 替换和重置路径。
+  watch(doc, () => { interfaceValidation.value = null; }, { flush: "sync" });
   const mdfDoc = shallowRef<MdfDocument | null>(null);
   const mdfSaving = shallowRef(false);
   const mdfEdits = serialEdits();
@@ -45,6 +50,7 @@ export function useWorkbench() {
   const exportedRevision = shallowRef(0);
   const unsaved = computed(() => !!doc.value?.dirty && revision.value !== exportedRevision.value);
   const mdfUnsaved = computed(() => !!mdfDoc.value?.unsaved);
+  const canAddMaterialInterfaces = computed(() => !!doc.value && mdfDoc.value?.selected?.mmtr_linked === true);
   const dialog = shallowRef<DialogState | null>(null);
   let resolveDialog: ((value: string | null) => void) | null = null;
   let unlistenClose: (() => void) | undefined;
@@ -70,7 +76,7 @@ export function useWorkbench() {
   const materialBatch = useMaterialBatch({
     dll,
     choosePath: (title, kind, value) => path(title, kind, value),
-    blocked: () => busy.value || !!dialog.value || !doc.value,
+    blocked: () => busy.value || !!dialog.value || !canAddMaterialInterfaces.value,
     drain: () => mdfEdits.drain(),
     setBusy: value => { busy.value = value; },
     committed: async () => {
@@ -243,7 +249,7 @@ export function useWorkbench() {
   }
   async function addMdfProperty() {
     if (!mdfDoc.value?.selected || busy.value) return;
-    if (doc.value && mdfDoc.value.selected.mmtr_linked === false) { error.value = "当前材质未使用已打开的 MMTR，不能从它新增接口。"; return; }
+    if (!doc.value || mdfDoc.value.selected.mmtr_linked !== true) { error.value = "请先打开对应 MMTR，并确认当前材质已关联。"; return; }
     const available = mdfDoc.value.binding?.missing_mdf_properties ?? [];
     if (!available.length) { error.value = "当前关联 MMTR 没有可新增的参数。"; return; }
     const firstSize = available[0].mmtr_size;
@@ -259,13 +265,13 @@ export function useWorkbench() {
   }
   async function deleteMdfProperty(name: string) {
     if (!mdfDoc.value?.selected || busy.value) return;
-    const approved = await ask({ title: "删除 MDF 参数？", description: `将删除参数 ${name}，导出后 MMTR 绑定报告会标记缺失。`, value: "", kind: "confirm", confirmLabel: "删除" });
+    const approved = await ask({ title: "删除 MDF 参数？", description: `只删除当前材质的 MDF 参数值 ${name}，不会删除 MMTR 声明。导出后此绑定会标记缺失，游戏可能改用默认值或改变材质表现。`, value: "", kind: "confirm", confirmLabel: "删除" });
     if (approved === null) return;
     await autoMdfEdit("mdf_delete_property", { name }, `删除参数 ${name}`);
   }
   async function addMdfTexture() {
     if (!mdfDoc.value?.selected || busy.value) return;
-    if (doc.value && mdfDoc.value.selected.mmtr_linked === false) { error.value = "当前材质未使用已打开的 MMTR，不能从它新增接口。"; return; }
+    if (!doc.value || mdfDoc.value.selected.mmtr_linked !== true) { error.value = "请先打开对应 MMTR，并确认当前材质已关联。"; return; }
     const available = mdfDoc.value.binding?.missing_mdf_textures ?? [];
     if (!available.length) { error.value = "当前关联 MMTR 没有可新增的纹理槽。"; return; }
     const input = await ask({ title: "新增 MDF 纹理槽", description: "选择当前 MMTR 中尚未写入该材质的 SRV，并填写纹理资源路径。", value: "", kind: "mdf-texture", confirmLabel: "新增", fields: { name: available[0].name, path: "" }, selectOptions: available.map(row => ({ value: row.name, label: row.name })) });
@@ -279,7 +285,7 @@ export function useWorkbench() {
   async function deleteMdfTexture(slot: number) {
     if (!mdfDoc.value?.selected || busy.value) return;
     const texture = mdfDoc.value.selected.textures[slot];
-    const approved = await ask({ title: "删除 MDF 纹理槽？", description: `将删除纹理槽 ${texture?.name ?? slot}，导出后 MMTR 绑定报告会标记缺失。`, value: "", kind: "confirm", confirmLabel: "删除" });
+    const approved = await ask({ title: "删除 MDF 纹理槽？", description: `只删除当前材质的 MDF 纹理槽 ${texture?.name ?? slot}，不会删除 MMTR 声明。导出后此绑定会标记缺失，游戏可能使用默认贴图或改变材质表现。`, value: "", kind: "confirm", confirmLabel: "删除" });
     if (approved === null) return;
     await autoMdfEdit("mdf_delete_texture", { slot }, `删除纹理槽 ${texture?.name ?? slot}`);
   }
@@ -493,26 +499,33 @@ export function useWorkbench() {
   // 通过后端 DXC 反射核对当前 metadata 与所有关联 Shader；验证失败不写入文件。
   async function validateMmtrInterfaces() {
     if (!doc.value || busy.value) return;
-    await run("用 DXC 反射验证 MMTR 接口…", async () => {
-      const report = await request<{
-        valid: boolean;
-        checked_shaders: number;
-        metadata_edits: number;
-        issues: Array<{ kind: string; shader_index?: number; record_index?: number; name?: string; problem?: string }>;
-      }>("mmtr_validate_interfaces", { dll: dll.value });
-      if (report.metadata_edits === 0) {
-        status.value = "当前没有待验证的 MMTR metadata 修改";
-        return;
-      }
-      if (!report.valid) {
-        const details = report.issues
-          .slice(0, 4)
-          .map((issue) => issue.problem ?? `${issue.kind} ${issue.name ?? ""}`)
-          .join("；");
-        throw new Error(`Shader 接口验证失败：${details}${report.issues.length > 4 ? "等" : ""}`);
-      }
-      status.value = `Shader 接口验证通过 · 已检查 ${report.checked_shaders} 个 DXIL`;
-    });
+    validatingInterfaces.value = true;
+    interfaceValidation.value = null;
+    try {
+      await run("用 DXC 反射验证 MMTR 接口…", async () => {
+        const report = await request<{
+          valid: boolean;
+          checked_shaders: number;
+          metadata_edits: number;
+          issues: InterfaceValidation["issues"];
+        }>("mmtr_validate_interfaces", { dll: dll.value });
+        interfaceValidation.value = {
+          state: report.metadata_edits === 0 ? "clean" : report.valid ? "passed" : "failed",
+          checkedShaders: report.checked_shaders,
+          metadataEdits: report.metadata_edits,
+          issues: report.issues,
+        };
+        if (report.metadata_edits === 0) {
+          status.value = "当前没有待验证的 MMTR metadata 修改";
+          return;
+        }
+        if (!report.valid) {
+          status.value = `Shader 接口验证失败 · ${report.issues.length} 项问题`;
+          return;
+        }
+        status.value = `Shader 接口验证通过 · 已检查 ${report.checked_shaders} 个 DXIL`;
+      });
+    } finally { validatingInterfaces.value = false; }
   }
   async function redirect(record: number, field: number) {
     const text = await ask({
@@ -745,6 +758,9 @@ export function useWorkbench() {
     materialBatch,
     materialRemoval,
     doc,
+    interfaceValidation,
+    validatingInterfaces,
+    canAddMaterialInterfaces,
     mdfDoc,
     mdfSaving,
     tab,
