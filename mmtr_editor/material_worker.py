@@ -14,6 +14,14 @@ def execute(request):
     document = restore_document(request['document'])
     if request['op'] == 'validate':
         return document.validate_metadata_interfaces(request['dll'], _in_worker=True)
+    if request['op'] == 'usage':
+        # 只读统计：同一进程内复用一个反汇编器，结果不含文档状态。
+        from .dxil_assembly import DxilAssembly
+        from .material_extension import current_layout
+        from .material_usage import material_input_usage
+        layout = current_layout(document, request['material'])
+        return material_input_usage(document, request['material'], layout,
+                                    DxilAssembly(request['dll']).disassemble)
     if request['op'] != 'extend':
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface
