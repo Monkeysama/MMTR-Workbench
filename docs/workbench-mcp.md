@@ -36,7 +36,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_open`|原子打开 MMTR、MDF 或两者；默认保护待替换文档的未导出修改|
 |`workbench_select_material`|切换后续操作使用的 MDF 材质|
 |`workbench_list`|分页搜索 shaders、passes、metadata、materials、properties、textures|
-|`workbench_inspect`|单个 Shader/通道/材质详情，或分页 binding/changes 报告|
+|`workbench_inspect`|单个 Shader/通道/材质详情，分页 binding/changes 或只读 structure 报告|
 |`workbench_read_shader`|分页读取 DXIL 或受限重建 HLSL|
 |`workbench_export_shader`|另存完整 DXBC、DXIL、HLSL 或最近编译结果|
 |`workbench_compile`|从源码字符串或文件编译，可直接严格替换指定 Shader|
@@ -53,6 +53,28 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_reset`|丢弃 MMTR/MDF 内存编辑，恢复打开时原字节|
 
 工具 schema 包含完整参数和枚举。MDF 批量动作采用 `action` 区分类型：`set_property`、`set_property_components`、`add_property`、`delete_property`、`set_texture`、`add_texture`、`delete_texture`、`set_setting`、`set_flags`、`set_master`。每项明确指定 `material_index`；最多 100 项，整批失败则恢复全部内存修改。`set_setting` 支持 shader_type、shader_lod、bake_texture_array_size；master 使用专用 `workbench_set_master` 或批次 `set_master` 动作。
+
+### 只读结构预检
+
+源码新增的 structure 查询在重新构建核心并重连 MCP 后可用，旧便携包不会自动获得。无需 DXC，打开 MMTR 后调用 `workbench_inspect`：
+
+```json
+{"kind":"structure","limit":20}
+```
+
+返回 header、当前候选 SHA256、对象数量和分层预检。`structure=passed` 只表示本模型没有发现结构问题；`shader_analysis=not_run`、`auto_extension=unproven`，不能代替 `workbench_validate` 或证明游戏可用。新解释发现问题时仍保留旧浏览功能。
+
+|kind|index 与分页|
+|---|---|
+|`structure_program`|index 为 Program/通道索引；表内 bindings 和对象身份分页|
+|`structure_objects`|分页读取物理对象；包含类别、范围、原字节摘要及前 256B 预览|
+|`structure_object_users`|index 为对象列表中的 index；分页列出所有引用 Program 及指针字段位置|
+|`structure_shader_users`|index 为 Shader 索引；分页列出所有引用 Program，保留 legacy lane 与实际 Shader 阶段的区别|
+|`structure_metadata`|不填 index 时列描述符；填 index 时读取该描述符和分页成员|
+|`structure_diagnostics`|分页诊断，包含严重度、代码、Program、绝对字段偏移|
+|`structure_unmodeled_ranges`|分页列出前缀中尚未解释的区段；包含字符串和 padding，不意味着这些字节可以删除|
+
+这里使用 `items/total/offset/next_offset` 分页格式，嵌套绑定、成员及使用者也分页。所有偏移、Program/对象索引属于返回 SHA256 对应的当前候选；编辑后应重新查询。状态 cache key 的算法为 `opaque`，未知资源类型保留原值并给出诊断。结构模型和限制详见[结构检查](structure-inspection.md)。
 
 ## 调用示例
 

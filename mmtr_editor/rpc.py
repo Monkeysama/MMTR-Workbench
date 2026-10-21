@@ -173,6 +173,12 @@ class Service:
             return {'path':req['path']}
         if op == 'snapshot':
             return self.snapshot()
+        if op == 'mmtr_inspect_structure':
+            if self.doc is None:
+                raise EditError('请先打开 MMTR。')
+            from .structure import document_structure
+            return document_structure(self.doc).report(req.get('view', 'summary'), req.get('index'),
+                                                      int(req.get('offset', 0)), int(req.get('limit', 40)))
         if op == 'mmtr_validate_interfaces':
             if self.doc is None:
                 raise EditError('请先打开 MMTR。')

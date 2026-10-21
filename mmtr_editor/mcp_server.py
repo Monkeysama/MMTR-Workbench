@@ -125,7 +125,8 @@ class WorkbenchSession:
         result = {'version': __version__, 'revision': self.revision, 'dxc_path': self.dll,
                   'session': 'independent_process', 'transport': 'stdio',
                   'capabilities': ['paged_queries', 'shader_compile_replace', 'mdf_batch_edit',
-                                   'auto_parameter_texture_extension', 'mdf_master_edit', 'validated_export'],
+                                   'auto_parameter_texture_extension', 'mdf_master_edit', 'validated_export',
+                                   'readonly_structure'],
                   'mmtr': None, 'mdf': None, 'compiled_size': len(service.compiled or b'')}
         if service.doc:
             doc = service.doc
@@ -264,9 +265,21 @@ def create_server(session=None):
                 'next_offset': end if end < len(rows) else None, 'items': items}
 
     @tool()
-    def workbench_inspect(kind: Literal['shader', 'pass', 'material', 'binding', 'changes'],
+    def workbench_inspect(kind: Literal['shader', 'pass', 'material', 'binding', 'changes',
+                                      'structure', 'structure_program', 'structure_objects',
+                                      'structure_object_users', 'structure_shader_users', 'structure_diagnostics',
+                                      'structure_metadata', 'structure_unmodeled_ranges'],
                           index: Index | None = None, offset: Index = 0, limit: Limit = 40) -> dict[str, Any]:
-        """查看单项详情或分页绑定/修改报告。Shader 的关联通道也分页；完整文本使用 read_shader。"""
+        """查看单项或分页报告。structure 是无需 DXC 的只读结构预检，不能代替寻址/Shader 验证。
+        structure_program 的 index 为 Program 索引；structure_object_users 为对象索引；
+        structure_shader_users 为 Shader 索引，列出所有引用者。完整 Shader 文本使用 read_shader。
+        """
+        if kind.startswith('structure'):
+            view = {'structure': 'summary', 'structure_program': 'program', 'structure_objects': 'objects',
+                    'structure_object_users': 'object_users', 'structure_shader_users': 'shader_users',
+                    'structure_diagnostics': 'diagnostics', 'structure_metadata': 'metadata',
+                    'structure_unmodeled_ranges': 'unmodeled_ranges'}[kind]
+            return state.call('mmtr_inspect_structure', view=view, index=index, offset=offset, limit=limit)
         if kind in ('shader', 'pass'):
             if index is None:
                 raise EditError('请指定 index。')

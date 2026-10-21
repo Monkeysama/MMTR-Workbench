@@ -28,6 +28,7 @@
 
 ## Git 与提交
 
+- 每个阶段完成实现与验证后及时单独提交，不把多个阶段长期堆积为一个提交；提交写明该阶段范围、验证及剩余限制。
 - 提交使用 Conventional Commits：`type(scope): description`，scope 可省略，破坏性改动用 `!` 并在正文说明。描述语言随意，必须使用 ASCII 冒号加空格。
 - 常见类型：feat、fix、docs、refactor、test、build、ci、chore、perf、style、revert。示例：`feat(mcp): 新增材质引用编辑`、`fix(mdf): preserve shared strings`。
 - 只暂存明确文件清单。提交前审查 `git diff --cached`，执行 `git diff --cached --check` 和 `python scripts/audit_repository.py --staged`。

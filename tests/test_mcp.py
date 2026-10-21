@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from test_mdf_editing import fixture
+from test_structure import fixture as mmtr_fixture, PATH as MMTR_PATH
 
 try:
     from mmtr_editor.mcp_server import WorkbenchSession, create_server
@@ -61,6 +62,50 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ToolError):
             await self.call('inspect', kind='material', index=100)
         self.assertEqual((await self.call('status'))['mdf']['material_count'], 2)
+
+    async def test_readonly_structure_queries_and_reverse_reference_paging(self):
+        from mmtr_editor.model import Document
+        self.state.service.doc = Document(mmtr_fixture(), MMTR_PATH)
+        before = self.state.service.doc.build()[0]
+        revision = self.state.revision
+        report = await self.call('inspect', kind='structure', limit=1)
+        self.assertEqual(report['program_count'], 4)
+        self.assertEqual(report['preflight']['shader_analysis'], 'not_run')
+        users = await self.call('inspect', kind='structure_shader_users', index=0, limit=1)
+        self.assertEqual(users['total'], 4)
+        self.assertEqual(users['next_offset'], 1)
+        users = await self.call('inspect', kind='structure_shader_users', index=0, offset=3, limit=1)
+        self.assertEqual(users['items'][0]['program'], 3)
+        objects = await self.call('inspect', kind='structure_objects', limit=1)
+        self.assertEqual(len(objects['items']), 1)
+        obj = objects['items'][0]
+        users = await self.call('inspect', kind='structure_object_users', index=obj['index'], limit=1)
+        self.assertEqual(users['total'], 4)
+        metadata = await self.call('inspect', kind='structure_metadata', limit=1)
+        self.assertEqual(metadata['items'][0]['name'], 'UserMaterial')
+        member = await self.call('inspect', kind='structure_metadata', index=0, limit=1)
+        self.assertEqual(member['members']['items'][0]['name'], 'Value')
+        program = await self.call('inspect', kind='structure_program', index=3)
+        self.assertEqual(program['target'], 3)
+        with self.assertRaises(ToolError):
+            await self.call('inspect', kind='structure_program', index=100)
+        self.assertEqual(self.state.revision, revision)
+        self.assertEqual(self.state.service.doc.build()[0], before)
+
+    async def test_structure_diagnostics_leave_old_browse_available(self):
+        import struct
+        from mmtr_editor.model import Document
+        data = bytearray(mmtr_fixture())
+        pointer = struct.unpack_from('<Q', data, 16+0x88)[0]
+        data[pointer+6] = 128
+        self.state.service.doc = Document(data, MMTR_PATH)
+        self.assertEqual((await self.call('list', kind='passes'))['total'], 4)
+        report = await self.call('inspect', kind='structure')
+        self.assertEqual(report['preflight']['structure'], 'failed')
+        diag = await self.call('inspect', kind='structure_diagnostics', limit=1)
+        self.assertEqual(len(diag['items']), 1)
+        self.assertIsNotNone(diag['next_offset'])
+        self.assertEqual(self.state.service.doc.build()[0], bytes(data))
 
     async def test_batch_failure_restores_prior_changes_and_revision(self):
         await self.call('edit_mdf', actions=[{'action': 'set_property', 'material_index': 0,
