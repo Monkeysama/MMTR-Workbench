@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { request, isDesktop } from "../api";
 import { droppedDocuments, useDocumentDrop } from "./useDocumentDrop";
 import { serialEdits } from "../utils/serialEdits";
+import { useMaterialBatch } from "./useMaterialBatch";
 import {
   basename,
   type CompileResult,
@@ -64,6 +65,24 @@ export function useWorkbench() {
       !doc.value.integrity.name_hash_mismatches.length &&
       !doc.value.integrity.shader_trailer_mismatches.length,
   );
+  // 批量任务复用核心事务，成功后只刷新已提交文档并推进一次未保存计数。
+  const materialBatch = useMaterialBatch({
+    dll,
+    blocked: () => busy.value || !!dialog.value || !doc.value,
+    drain: () => mdfEdits.drain(),
+    setBusy: value => { busy.value = value; },
+    committed: async () => {
+      const [mmtr, mdf] = await Promise.all([
+        request<DocumentInfo>("snapshot"), request<MdfDocument | null>("mdf_snapshot"),
+      ]);
+      doc.value = mmtr;
+      mdfDoc.value = mdf;
+      revision.value += 1;
+      ir.value = "";
+      sourceTrace.value = null;
+      status.value = "批次已完成 · MMTR 与全部已知关联材质已同步，请分别另存";
+    },
+  });
 
   function ask(options: DialogState) {
     if (dialog.value) return Promise.resolve(null);
@@ -408,54 +427,8 @@ export function useWorkbench() {
     if (name !== null)
       await mutate("rename", { pointer: row.pointer, name }, "更新共享名称…");
   }
-  // dev前端会热更新，Python侧车仍可能驻留旧模块；先确认后端能力，防止退回metadata-only修改。
-  async function requireMaterialExtensionCore() {
-    const capabilities = await request<{ material_interface_extensions?: boolean }>("ping");
-    if (!capabilities.material_interface_extensions) {
-      throw new Error("后端尚未加载接口扩展修复，请关闭并重新打开 MMTR Workbench。");
-    }
-  }
-  async function addMmtrParameter() {
-    if (!doc.value || busy.value) return;
-    const userMaterial = doc.value.metadata.find((row) => row.kind === "cbuffers" && row.name === "UserMaterial");
-    const currentSize = userMaterial?.size ?? 0;
-    const input = await ask({
-      title: "新增 MMTR 参数",
-      description: `偏移使用当前缓冲末尾 ${currentSize}，支持 4/8/12/16 字节。需打开关联 MDF，新增时自动同步 Shader。`,
-      value: "",
-      kind: "parameter",
-      confirmLabel: "新增",
-      parameter: { name: "", byteSize: "4", byteOffset: String(currentSize) },
-    });
-    if (input === null) return;
-    let values: { name: string; byteSize: string; byteOffset: string };
-    try {
-      values = JSON.parse(input);
-    } catch {
-      error.value = "参数输入格式无效。";
-      return;
-    }
-    const name = values.name.trim();
-    const byteSize = Number(values.byteSize), byteOffset = Number(values.byteOffset);
-    if (!name || ![4, 8, 12, 16].includes(byteSize) || byteOffset !== currentSize) {
-      error.value = `字节宽度请选择 4/8/12/16，偏移必须等于 ${currentSize}。`;
-      return;
-    }
-    await run("新增参数并同步所有受影响 Shader…", async () => {
-      await requireMaterialExtensionCore();
-      await request("mmtr_add_cbuffer_member", {
-        cbuffer: "UserMaterial",
-        name,
-        byte_size: byteSize,
-        byte_offset: byteOffset,
-        auto_sync: true,
-        dll: dll.value,
-      });
-      const refreshed = await request<DocumentInfo>("snapshot");
-      doc.value = refreshed;
-      mdfDoc.value = await request<MdfDocument | null>("mdf_snapshot");
-      status.value = "参数及 Shader 已同步 · 可在关联 MDF 中添加该参数并分别另存";
-    });
+  function addMmtrParameter() {
+    materialBatch.open("parameter");
   }
   async function deleteMmtrParameter(row: Metadata) {
     if (!doc.value || busy.value) return;
@@ -470,20 +443,18 @@ export function useWorkbench() {
   }
   async function addMmtrResource(kind: "srvs" | "samplers" | "uavs") {
     if (!doc.value || busy.value) return;
-    const label = kind === "srvs" ? "SRV" : kind === "samplers" ? "Sampler" : "UAV";
-    const input = await ask({ title: `新增 MMTR ${label}`, description: kind === "srvs" ? "选择使用材质贴图的记录，自动新增 Texture2D 并同步关联表及 Shader；需打开关联 MDF。" : `记录必须已经有非空 ${label} 表，名称必须已由 Shader 字节码声明。`, value: "", kind: "resource", confirmLabel: "新增", fields: { record: "", name: "" } });
+    if (kind === "srvs") { materialBatch.open("texture"); return; }
+    const label = kind === "samplers" ? "Sampler" : "UAV";
+    const input = await ask({ title: `新增 MMTR ${label}`, description: `记录必须已经有非空 ${label} 表，名称必须已由 Shader 字节码声明。`, value: "", kind: "resource", confirmLabel: "新增", fields: { record: "", name: "" } });
     if (input === null) return;
     let fields: { record: string; name: string };
     try { fields = JSON.parse(input); } catch { error.value = "资源输入格式无效。"; return; }
-    const recordText = fields.record, name = fields.name.trim();
-    const recordIndex = Number(recordText);
+    const name = fields.name.trim(), recordIndex = Number(fields.record);
     if (!Number.isInteger(recordIndex) || recordIndex < 0 || !name) { error.value = "记录索引必须是非负整数，资源名称不能为空。"; return; }
-    await run(kind === "srvs" ? "新增纹理接口并同步所有受影响 Shader…" : `更新 MMTR ${label} metadata…`, async () => {
-      if (kind === "srvs") await requireMaterialExtensionCore();
-      await request("mmtr_add_resource", { kind, record_index: recordIndex, name, auto_sync: kind === "srvs", dll: dll.value });
+    await run(`更新 MMTR ${label} metadata…`, async () => {
+      await request("mmtr_add_resource", { kind, record_index: recordIndex, name, auto_sync: false, dll: dll.value });
       doc.value = await request<DocumentInfo>("snapshot");
-      mdfDoc.value = await request<MdfDocument | null>("mdf_snapshot");
-      status.value = kind === "srvs" ? "纹理接口及 Shader 已同步 · 可在关联 MDF 中添加该槽位并分别另存" : `MMTR ${label} metadata 已暂存 · 仍需同步绑定映射及 Shader`;
+      status.value = `MMTR ${label} metadata 已暂存 · 仍需同步绑定映射及 Shader`;
     });
   }
   async function deleteMmtrResource(kind: "srvs" | "samplers" | "uavs") {
@@ -754,6 +725,7 @@ export function useWorkbench() {
   });
   return {
     fileDrop,
+    materialBatch,
     doc,
     mdfDoc,
     mdfSaving,

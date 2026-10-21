@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
+/** 核心明确拒绝与网络中断分开，后台提交才能判断是否应重试原请求。 */
+export class CoreRequestError extends Error {}
 export async function request<T>(
   op: string,
   args: Record<string, unknown> = {},
@@ -20,6 +22,6 @@ export async function request<T>(
           );
         return r.json() as Promise<{ ok: boolean; result: T; error?: string }>;
       });
-  if (!response.ok) throw new Error(response.error ?? "操作失败");
+  if (!response.ok) throw new CoreRequestError(response.error ?? "操作失败");
   return response.result;
 }

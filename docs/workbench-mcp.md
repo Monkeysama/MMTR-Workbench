@@ -99,7 +99,9 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 同会话只运行一个修改任务。重试必须使用原 request_key、动作和摘要，包括已经完成的任务；同键不同请求会拒绝。会话最多保留128个任务，不淘汰幂等键，重启后不恢复。读取返回已提交状态；期间发生编辑、材质切换或 DXC 改变，会拒绝过期候选，保留较新的编辑。
 
-取消只回收候选 worker，不改当前文档或写入文件。cancel 返回 cancelling 后继续查询，直到 cancelled；若提交先完成则返回 succeeded。Windows worker 归属于 kill-on-close Job Object，父进程异常退出也会回收。旧单项工具仍兼容同步调用；本检查点尚未接入桌面批量表单，冻结进程和桌面交互需后续独立验收。
+取消只回收候选 worker，不改当前文档或写入文件。cancel 返回 cancelling 后继续查询，直到 cancelled；若提交先完成则返回 succeeded。Windows worker 归属于 kill-on-close Job Object，冻结入口另监视 onefile 启动器，外层被终止时也结束内层核心。旧单项 MCP 工具仍兼容同步调用。桌面“参数与资源”的批量图标、参数/SRV 新增入口共用该后台任务服务。
+
+P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取消不变、过期拒绝、混合成功、运行中及成功后请求重试、成功后取消仍返回成功；状态查询最大延时分别为0.282/0.344秒，不能作为其它机器的耗时保证。Windows onefile 外层强制结束的进程树回收另行通过。桌面构建中的自有 HLSL 混合批次通过并自动定位新增参数，源码桌面使用 Stocking 验证进度与取消。均未进行游戏验证或自动安装；证据和局限见[后台材质任务](material-jobs.md)。
 
 ## 调用示例
 

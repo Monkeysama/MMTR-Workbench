@@ -12,11 +12,11 @@ import {
   ElAlert,
   ElTooltip,
 } from "element-plus";
-import { Search, Download, Pencil, Trash2 } from "lucide-vue-next";
+import { Search, Download, Pencil, Trash2, Layers3 } from "lucide-vue-next";
 import { hex, type DocumentInfo, type Metadata } from "../types";
 const props = defineProps<{ doc: DocumentInfo; busy: boolean }>();
 type ResourceKind = "srvs" | "samplers" | "uavs";
-const emit = defineEmits<{ rename: [row: Metadata]; add: []; remove: [row: Metadata]; "add-resource": [kind: ResourceKind]; "remove-resource": [kind: ResourceKind]; validate: []; export: [] }>();
+const emit = defineEmits<{ rename: [row: Metadata]; add: []; batch: []; remove: [row: Metadata]; "add-resource": [kind: ResourceKind]; "remove-resource": [kind: ResourceKind]; validate: []; export: [] }>();
 const search = shallowRef(""),
   buffer = shallowRef("UserMaterial"),
   page = shallowRef(1);
@@ -71,7 +71,7 @@ watch(
       type="info"
       :closable="false"
       show-icon
-      title="这里展示名称与布局；肤色、发光强度等实际值由 MDF 或运行时提供。新增或删除只改 MMTR metadata，必须保证 Shader 字节码已同步。"
+      title="这里展示名称与布局；实际值由 MDF 或运行时提供。批量新增会同步 Shader 与关联 MDF；删除接口仍需单独处理 Shader。"
     />
     <section class="panel data-panel">
       <div class="table-toolbar">
@@ -91,6 +91,8 @@ watch(
             :key="b"
             :label="b"
             :value="b" /></ElSelect
+        ><ElTooltip content="批量新增参数与贴图"><ElButton :disabled="busy" aria-label="批量新增参数与贴图" @click="emit('batch')"
+          ><Layers3 :size="17" /></ElButton></ElTooltip
         ><ElButton v-if="buffer === 'UserMaterial'" :disabled="busy" @click="emit('add')"
           >新增参数</ElButton
         ><ElButton v-if="resourceKind" :disabled="busy" @click="emit('add-resource', resourceKind!)"

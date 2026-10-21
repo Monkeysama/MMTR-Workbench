@@ -100,6 +100,8 @@ class MaterialJobs:
             job.thread = Thread(target=self._run, args=(job, candidate, dll, request, source),
                                 name='mmtr-material-'+job.id[:8], daemon=True)
             with self.lock:
+                if self.closed:
+                    raise EditError('任务会话已关闭。')
                 self.jobs[job.id] = job
                 self.keys[request_key] = job.id
                 try:

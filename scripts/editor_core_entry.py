@@ -1,4 +1,7 @@
 import sys
+from mmtr_editor.process_lifetime import watch_frozen_parent
+
+watch_frozen_parent()
 
 if sys.argv[1:]==['--dxc-worker']:
     from mmtr_editor.dxc_worker import main

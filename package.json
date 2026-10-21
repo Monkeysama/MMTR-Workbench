@@ -12,7 +12,7 @@
     "core:build": "python scripts/build_editor_core.py",
     "package": "npm run desktop:build && python scripts/package_editor.py",
     "test:core": "python scripts/test_core.py",
-    "test:frontend": "node --experimental-strip-types --test tests/dxil-readable.test.ts tests/source-trace.test.ts tests/mdf-editing.test.ts",
+    "test:frontend": "node --experimental-strip-types --test tests/dxil-readable.test.ts tests/source-trace.test.ts tests/mdf-editing.test.ts tests/material-batch.test.ts",
     "test:readable": "node --experimental-strip-types --test tests/dxil-readable.test.ts",
     "mcp": "python scripts/run_mcp.py",
     "test:mcp": "python scripts/test_mcp.py",

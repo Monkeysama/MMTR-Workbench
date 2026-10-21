@@ -169,6 +169,21 @@ class MaterialJobTests(unittest.TestCase):
             self.assertEqual(self.owner.service.mdf.build()[0], before)
             self.assertEqual(self.owner.revision, 3)
 
+    def test_close_during_snapshot_never_starts_late_worker(self):
+        from mmtr_editor.material_jobs import prepare_material_batch
+
+        def closing(*args, **kwargs):
+            result = prepare_material_batch(*args, **kwargs)
+            self.jobs.close()
+            return result
+
+        with patch('mmtr_editor.material_jobs.prepare_material_batch', side_effect=closing), \
+                patch('mmtr_editor.material_jobs.apply_material_batch') as worker:
+            with self.assertRaisesRegex(EditError, '已关闭'):
+                self.submit()
+            worker.assert_not_called()
+        self.assertEqual(self.jobs.jobs, {})
+
 
 class ControlledMaterialProcessTests(unittest.TestCase):
     """真实 Python 子进程验证管道、大输入、进度、超时与取消，不依赖 DXC。"""

@@ -39,6 +39,7 @@ import MdfPanel from "./MdfPanel.vue";
 import FileDialog from "./FileDialog.vue";
 import ToolSettings from "./ToolSettings.vue";
 import FileDropOverlay from "./FileDropOverlay.vue";
+import MaterialBatchDialog from "./material/MaterialBatchDialog.vue";
 const wb = useWorkbench();
 const {
   doc,
@@ -237,6 +238,7 @@ function navigate(id: string) {
             :busy="busy"
             @rename="wb.rename"
             @add="wb.addMmtrParameter"
+            @batch="wb.materialBatch.open()"
             @remove="wb.deleteMmtrParameter"
             @add-resource="wb.addMmtrResource"
             @remove-resource="wb.deleteMmtrResource"
@@ -339,6 +341,14 @@ function navigate(id: string) {
         @expert="expert = $event"
       />
       <FileDialog v-if="dialog" :dialog="dialog" @done="wb.finishDialog" />
+      <MaterialBatchDialog v-if="wb.materialBatch.visible.value"
+        v-model:rows="wb.materialBatch.rows.value" v-model:record="wb.materialBatch.record.value"
+        :passes="doc?.passes ?? []" :plan="wb.materialBatch.plan.value" :job="wb.materialBatch.job.value"
+        :error="wb.materialBatch.error.value" :working="wb.materialBatch.working.value"
+        :loading="wb.materialBatch.loading.value" :pending="!!wb.materialBatch.pending.value"
+        :has-textures="wb.materialBatch.hasTextures.value"
+        @add="wb.materialBatch.add" @close="wb.materialBatch.close" @preview="wb.materialBatch.preview"
+        @start="wb.materialBatch.start" @cancel="wb.materialBatch.cancel" @retry="wb.materialBatch.submitPending" />
     </div>
   </ElConfigProvider>
 </template>
