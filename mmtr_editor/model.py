@@ -474,7 +474,7 @@ class Document:
         changed_cbuffers = {edit['cbuffer'] for edit in self.metadata_edits
                             if edit['kind'] in ('add_cbuffer_member', 'remove_cbuffer_member')}
         extensions = [edit for edit in self.metadata_edits if edit['kind'] == 'extend_material_interface']
-        if any(edit.get('parameter') for edit in extensions):
+        if any(edit.get('parameter') or edit.get('parameters') for edit in extensions):
             changed_cbuffers.add('UserMaterial')
         # 自动迁移证据绑定实际Shader字节；后续替换或手动修改不得复用旧通过结论。
         if extensions:

@@ -69,9 +69,14 @@ def material_reads(ir):
         register, base, stride = None, None, None
         # 自定义Shader可直接按float读取同一材质CB；地址证明和字段迁移与整数读取相同。
         cb = re.fullmatch(r'call %dx\.types\.CBufRet\.(i32|f32) @dx\.op\.cbufferLoadLegacy\.\1\(i32 59, %dx.types.Handle %\w+, i32 (\d+)\)', text)
-        raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle %\w+, i32 (%\w+), i32 (0|undef), i8 (\d+), i32 4\)', text)
+        raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle %\w+, i32 (%\w+|\d+), i32 (0|undef), i8 (\d+), i32 4\)', text)
         if cb and kind == 'cb':
             register = int(cb[2])
+        elif raw and raw[1].isdigit():
+            # 常量地址只接受参数实例流的0号实例（计算Shader常见）；是否越过参数区由迁移按布局判断。
+            if kind != 'instance' or raw[2] != 'undef' or int(raw[1]) % 16:
+                raise ValueError(f'未知材质读取：{text}')
+            register = int(raw[1]) // 16
         elif raw:
             address = definitions[raw[1]]['text']
             add = re.fullmatch(r'(?:add(?: nuw)?(?: nsw)?|or) i32 (%\w+), (\d+)', address)
@@ -81,10 +86,13 @@ def material_reads(ir):
                     raise ValueError(f'未知材质表基址：{address}')
                 register = relative
             elif kind == 'instance' and raw[2] == 'undef':
-                stride = re.fullmatch(r'mul(?: nuw)?(?: nsw)? i32 (%\w+), (\d+)', definitions[base]['text'])
-                if not stride or relative % 16:
+                # 步长为2的幂时编译器以shl代替mul；两者都按“实例索引×步长”记录，迁移时统一改写为mul。
+                stride = re.fullmatch(r'(mul|shl)(?: nuw)?(?: nsw)? i32 (%\w+), (\d+)',
+                                      definitions.get(base, {}).get('text', ''))
+                if not stride or relative % 16 or (stride[1] == 'shl' and not 4 <= int(stride[3]) <= 16):
                     raise ValueError(f'未知参数实例地址：{address}')
-                stride = {'ssa': base, 'index': stride[1], 'bytes': int(stride[2])}
+                stride = {'ssa': base, 'index': stride[2], 'op': stride[1],
+                          'bytes': int(stride[3]) if stride[1] == 'mul' else 1 << int(stride[3])}
                 if address.startswith('or ') and relative >= (stride['bytes'] & -stride['bytes']):
                     raise ValueError('实例OR地址未证明与加法等价。')
                 register = relative // 16
@@ -98,8 +106,9 @@ def material_reads(ir):
                 raise ValueError(f'材质aggregate有未支持的消费者：{user["text"]}')
             extracts.append({'ssa': user['value'], 'lane': int(ex[1]), 'offset': register * 16 + int(ex[1]) * 4})
         result.append({'ssa': value, 'text': text, 'kind': kind, 'register': register,
-                       'base': base, 'stride': stride, 'address_ssa': raw[1] if raw else None,
-                       'address_rhs': definitions[raw[1]]['text'] if raw else None,
+                       'base': base, 'stride': stride,
+                       'address_ssa': raw[1] if raw and not raw[1].isdigit() else None,
+                       'address_rhs': definitions[raw[1]]['text'] if raw and not raw[1].isdigit() else None,
                        'raw': raw.groups() if raw else None,
                        'extracts': extracts})
     return result
@@ -131,6 +140,11 @@ def relocate_material_reads(ir, old, new, *, reads=None):
     # 同一会话可连续追加纹理和参数；前一次生成的SSA仍在IR中，后续必须分配新名称。
     used_names = set(re.findall(r'^\s*(%\w+)\s*=', ir, re.M))
     for read in reads:
+        if read['kind'] == 'instance' and read['stride'] is None:
+            # 常量地址：参数不移动，只要读取仍在原参数区内即无需改写；越界可能是折叠后的非0实例，拒绝。
+            if any(ex['offset'] >= old.parameter_bytes for ex in read['extracts']):
+                raise ValueError('参数实例常量地址超出原参数区，无法证明实例编号。')
+            continue
         if read['kind'] == 'instance':
             stride = read['stride']
             if stride['bytes'] != old.parameter_bytes:
@@ -180,8 +194,14 @@ def relocate_material_reads(ir, old, new, *, reads=None):
             changes.append({'ssa': ssa, 'kind': read['kind'], 'old_offset': ex['offset'], 'new_offset': target})
     for ssa, stride in strides.items():
         line_index, line = anchor(ssa)
-        rhs = line.split(' = ', 1)[1]
-        updated = re.sub(r', ' + str(old.parameter_bytes) + r'$', f', {new.parameter_bytes}', rhs)
+        rhs = line.split(' = ', 1)[1].split('  ;', 1)[0]
+        if stride.get('op') == 'shl':
+            # 新步长不一定是2的幂；去掉shl的无溢出标记，按普通乘法表达同一“索引×步长”。
+            updated = f'mul i32 {stride["index"]}, {new.parameter_bytes}'
+            if not re.fullmatch(r'shl(?: nuw)?(?: nsw)? i32 ' + re.escape(stride['index']) + r', \d+', rhs):
+                raise ValueError('IR步长锚点与已解析的实例读取不一致。')
+        else:
+            updated = re.sub(r', ' + str(old.parameter_bytes) + r'$', f', {new.parameter_bytes}', rhs)
         replacements[line_index] = f'  {ssa} = {updated}'
     if not replacements:
         return ir, {'loads': len(reads), 'relocated_extracts': changes,

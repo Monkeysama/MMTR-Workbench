@@ -39,8 +39,9 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 20)
+        self.assertEqual(len(tools), 21)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_export'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_reset'].annotations.destructive_hint)
         self.assertTrue(tools['workbench_export'].annotations.open_world_hint)
@@ -49,6 +50,48 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
         self.assertEqual(tools['workbench_redirect'].input_schema['properties']['field']['type'], 'integer')
+
+    # 读取统计只读：缺 MMTR 时拒绝；同一字节状态复用缓存，筛选与分页在缓存结果上进行。
+    async def test_usage_requires_mmtr_caches_and_filters(self):
+        with self.assertRaisesRegex(ToolError, '打开 MMTR'):
+            await self.call('usage')
+        report = {'material': 'Material0', 'shaders_analyzed': 3, 'complete': {'parameters': True, 'textures': True},
+                  'parameters': [{'name': 'A', 'state': 'used'}, {'name': 'B', 'state': 'unused'}],
+                  'textures': [{'name': 'T', 'state': 'descriptor'}], 'gpbf': [], 'failures': [], 'notes': []}
+        doc = SimpleNamespace(build=lambda: (b'mmtr', {}))
+        dll = self.root/'identity.dll'
+        dll.write_bytes(b'not loaded; identity only')
+        self.state.dll = str(dll)
+        calls = []
+        with patch.object(self.state, 'material_index', return_value=0), \
+                patch.object(self.state, 'require_doc', return_value=doc), \
+                patch.object(self.state, 'call', side_effect=lambda op, **args: calls.append(op) or report):
+            result = await self.call('usage', state_filter='unused')
+            self.assertEqual([row['name'] for row in result['items']], ['B'])
+            self.assertEqual(result['counts']['textures']['descriptor'], 1)
+            result = await self.call('usage', kind='textures', limit=1)
+            self.assertEqual((result['total'], result['next_offset']), (1, None))
+            self.assertFalse(result['coverage']['deletion_supported'])
+            dll.write_bytes(b'replaced at same path')
+            await self.call('usage')
+        self.assertEqual(calls, ['mmtr_material_usage', 'mmtr_material_usage'])
+
+    async def test_usage_rejects_dxc_changing_during_worker(self):
+        dll = self.root/'changing.dll'
+        dll.write_bytes(b'first')
+        self.state.dll = str(dll)
+        doc = SimpleNamespace(build=lambda: (b'mmtr', {}))
+
+        def changed(*args, **kwargs):
+            dll.write_bytes(b'second')
+            return {}
+
+        with patch.object(self.state, 'material_index', return_value=0), \
+                patch.object(self.state, 'require_doc', return_value=doc), \
+                patch.object(self.state, 'call', side_effect=changed):
+            with self.assertRaisesRegex(ToolError, 'DXC .*改变'):
+                await self.call('usage')
+        self.assertIsNone(self.state.usage_cache)
 
     async def test_unicode_open_pagination_and_errors_preserve_session(self):
         result = await self.call('list', kind='materials', limit=1)

@@ -179,6 +179,12 @@ class Service:
             from .structure import document_structure
             return document_structure(self.doc).report(req.get('view', 'summary'), req.get('index'),
                                                       int(req.get('offset', 0)), int(req.get('limit', 40)))
+        if op in ('material_plan', 'material_apply'):
+            from .material_service import prepare_material_batch, apply_material_batch
+            arguments = (self, req['dll'], req.get('actions'), req.get('record_index'), req.get('source_revision', 0))
+            if op == 'material_plan':
+                return prepare_material_batch(*arguments)[0].report()
+            return apply_material_batch(*arguments, expected_plan=req.get('expected_plan'))
         if op == 'mmtr_validate_interfaces':
             if self.doc is None:
                 raise EditError('请先打开 MMTR。')
@@ -247,6 +253,18 @@ class Service:
             else:
                 self.doc.remove_resource(str(req['kind']), int(req['record_index']), str(req['name']))
             return self.snapshot()
+        if op == 'mmtr_material_usage':
+            if self.doc is None or self.mdf is None:
+                raise EditError('读取统计需要同时打开 MMTR 和关联 MDF。')
+            if not req.get('dll'):
+                raise EditError('请先设置DXC路径，再统计材质读取。')
+            from .mdf import _public_data
+            from .material_process import run_material_task
+            index = int(req['material_index'])
+            material = self.mdf.material(index)
+            if not master_matches(material['master'], str(self.doc.source)):
+                raise EditError('所选 MDF 材质未关联当前 MMTR。')
+            return run_material_task(self.doc, 'usage', req['dll'], material=_public_data(material))
         if op == 'mdf_snapshot':
             return self.mdf_snapshot()
         if op == 'mdf_open':
