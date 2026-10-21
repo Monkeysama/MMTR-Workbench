@@ -19,8 +19,16 @@ def event_headers(event):
     before, after = event.get('before'), event.get('after')
     if not after or set(after) == {'0'}:
         return []
-    revision = f'{before}..{after}' if before and set(before) != {'0'} else after
-    output = subprocess.check_output(['git', 'log', '--no-merges', '--format=%s', revision], text=True, encoding='utf-8')
+    if before and set(before) != {'0'}:
+        revision = [f'{before}..{after}']
+    else:
+        # 新分支推送没有 before；只检查默认分支之外的提交，不回溯整个历史。
+        default = (event.get('repository') or {}).get('default_branch')
+        base = f'origin/{default}' if default else None
+        exists = base and subprocess.run(['git', 'rev-parse', '--verify', '--quiet', base],
+                                         stdout=subprocess.DEVNULL).returncode == 0
+        revision = [f'{base}..{after}'] if exists else [after]
+    output = subprocess.check_output(['git', 'log', '--no-merges', '--format=%s', *revision], text=True, encoding='utf-8')
     return output.splitlines()
 
 
