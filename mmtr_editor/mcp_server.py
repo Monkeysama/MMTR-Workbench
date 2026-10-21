@@ -469,7 +469,7 @@ def create_server(session=None):
         return state.jobs.removal_preview([action.model_dump() for action in actions], material_index, request_key,
             variant=None if variant is None else variant.model_dump())
 
-    @tool(job=True, job_write=True)
+    @tool(job=True, job_write=True, destructive=True)
     def workbench_removal_submit(actions: RemovalActions, expected_plan: str,
             request_key: Annotated[str, Field(min_length=1, max_length=128)], material_index: Index | None = None,
             variant: VariantOptions | None = None) -> dict[str, Any]:
@@ -482,6 +482,15 @@ def create_server(session=None):
         """返回已验证范围内的效果模板合同；不修改 MMTR/MDF，不编译或宣称游戏效果通过。"""
         from .effect_templates import effect_template
         return effect_template(name)
+
+    @tool(job=True)
+    def workbench_effect_preview(name: Literal['emission_multiplier'], record_index: Index | None = None,
+            variant: VariantOptions | None = None) -> dict[str, Any]:
+        """将封闭效果模板送入现有只读批量布局计划；不编译 Shader、不修改文档。"""
+        from .effect_templates import effect_template
+        template = effect_template(name)
+        return state.jobs.preview(template['actions'], record_index,
+            variant=None if variant is None else variant.model_dump())
 
     @tool()
     def workbench_read_shader(index: Index, format: Literal['dxil', 'hlsl'] = 'dxil',

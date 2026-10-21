@@ -41,6 +41,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_removal_preview`|短调用启动只读删除预检，复用 material_status/result/cancel；不执行删除|
 |`workbench_removal_submit`|提交通过消费者证明的有界 MMTR/MDF 删除候选；重编译、重解析后更新当前会话|
 |`workbench_effect_template`|返回 `emission_multiplier` 的参数、纹理、输入/输出和 Shader 合同；不执行编译或写入|
+|`workbench_effect_preview`|将效果模板动作送入批量最终布局预检；不编译 Shader 或修改文档|
 |`workbench_read_shader`|分页读取 DXIL 或受限重建 HLSL|
 |`workbench_export_shader`|另存完整 DXBC、DXIL、HLSL 或最近编译结果|
 |`workbench_compile`|从源码字符串或文件编译，可直接严格替换指定 Shader|
@@ -208,7 +209,7 @@ PS声明可以混有其它space的有限或无界SRV数组：这些声明保留�
 
 `workbench_removal_preview` 在已知全部关联材质布局一致时启动只读后台任务。输入 `actions=[{"action":"parameter","name":"UnusedP"},{"action":"texture","name":"UnusedMap"}]`、非空 `request_key` 和可选 `material_index`；`workbench_removal_submit` 使用预览返回的 `plan_digest` 和新的请求键提交候选。两者查询/取消复用现有材质任务接口。结果 `eligible=true` 才能进入删除执行；已用、仅读取描述符、未知访问、句柄逃逸、跨函数调用和 MMTRS 阻止资格。执行器同步声明、STAT、绑定表、计数和已知 MDF，并在失败时不更新当前会话。独立变体可传既有变体目标，提交后仍需显式导出。逐 Shader 身份、失败与最终收缩布局见分页结果；边界见[删除边界](material-removal.md)。
 
-`workbench_effect_template(name="emission_multiplier")` 只返回封闭的 P6 合同：新增 `MMTR_EmissionStrength` 和 `MMTR_EmissionMap`，输入是原像素输出与这两个接口，输出是最终像素输出；调用方必须提供显式读取并保留原受光/透明分支的 Shader，再通过批量接口编译验证。状态编辑、任意节点图和 GPU 预览仍未开放。
+`workbench_effect_template(name="emission_multiplier")` 返回封闭的 P6 合同：新增 `MMTR_EmissionStrength` 和 `MMTR_EmissionMap`，输入是原像素输出与这两个接口，输出是最终像素输出。`workbench_effect_preview` 将同一动作送入批量最终布局计划；调用方必须提供显式读取并保留原受光/透明分支的 Shader，再通过批量接口编译验证。状态编辑、任意节点图和 GPU 预览仍未开放。
 
 2026-10-21 的 PR #3 整合验证：核心 330 项中 242 通过、88 项可选语料跳过，MCP 19 项通过，前端 17 项通过/1 项缺 fixture 跳过，TypeScript/Vite 构建通过。自有 HLSL 通过隔离 DXC 验证 shl 步长和常量地址在参数/纹理混合批次后的实际读取。固定 P0 Stocking 输入的真实源码 stdio 查询首次约 15.40 秒，后续分页约 0.04 秒；报告识别 164 个参数、21 个纹理、4 个 GPBF 有读取，11 个参数为 unknown，整体覆盖未完成，不能推断这些参数未使用。会话 revision、文档状态与输入文件字节均保持不变。证据仅限源码/CPU/DXC；未验收冻结包、GPU 或游戏效果。本地复现记录位于忽略的 `output/pr3-*`，不是线上附件。
 
