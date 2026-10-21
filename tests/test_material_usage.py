@@ -146,6 +146,12 @@ define void @helper() {
             self.assertFalse(report['complete']['textures'])
             self.assertEqual(states(report, 'textures')['texB'], 'unknown')
 
+    def test_heap_material_handle_escape_is_unknown(self):
+        escaped = HEAP_IR.replace('  ret void', '  call void @escape(%dx.types.Handle %cb)\n  ret void')
+        report = usage([escaped])
+        self.assertFalse(report['complete']['parameters'])
+        self.assertTrue(any(row['scope'] in ('record', 'cbuffer') for row in report['failures']))
+
     # 参数实例流的读取计入参数；超出参数区的常量地址不解释为尾部字段。
     def test_instance_reads_count_as_parameters_only(self):
         def instance(address):

@@ -25,6 +25,16 @@ def execute(request):
             return material_input_usage(document, request['material'], layout, compiler.disassemble)
         finally:
             compiler.close()
+    if request['op'] == 'removal_preview':
+        from .dxil_assembly import DxilAssembly
+        from .material_removal import analyze_material_removal
+        from .material_control import progress_writer
+        compiler = DxilAssembly(request['dll'])
+        try:
+            return analyze_material_removal(document, request['material'], request['actions'],
+                compiler.disassemble, progress=progress_writer(request.get('progress_file')))
+        finally:
+            compiler.close()
     if request['op'] != 'extend':
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface

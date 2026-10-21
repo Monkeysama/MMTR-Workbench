@@ -34,6 +34,47 @@ def _reaches_heap_handle(uses, ssa, limit=64):
     return None if pending else False
 
 
+def _material_handle_gaps(definitions, uses, origins, recognized_loads, cbuffer_name):
+    """检查材质句柄的全部消费者，包括没有赋值结果的调用；逃逸不能成为无读取证明。"""
+    handles = {}
+    for value, origin in origins.items():
+        name = origin.get('binding', {}).get('name')
+        if origin.get('kind') == 'named-resource':
+            if name == cbuffer_name:
+                handles[value] = 'cbuffer'
+            elif name in ('BindlessBuffer', 'UserMaterialInstances'):
+                handles[value] = 'record'
+        annotation = origin.get('annotation', {}).get('text', '')
+        if origin.get('kind') == 'heap-descriptor' and re.search(
+                r'%dx.types.ResourceProperties \{ i32 13, i32 \d+ \}', annotation):
+            handles[value] = 'record'
+            parent = re.search(r'%dx.types.Handle (%[\w.]+), %dx.types.ResourceProperties', annotation)
+            if parent:
+                handles[parent[1]] = 'record'
+    # 注解可以形成多层别名；即使后续注解声称另一种资源类型，仍跟踪原材质句柄。
+    changed = True
+    while changed:
+        changed = False
+        for value, row in definitions.items():
+            annotation = re.fullmatch(r'call %dx.types.Handle @dx.op.annotateHandle\('
+                r'i32 216, %dx.types.Handle (%[\w.]+), .*', row['text'])
+            if annotation and annotation[1] in handles and value not in handles:
+                handles[value] = handles[annotation[1]]
+                changed = True
+    errors = []
+    for handle, scope in handles.items():
+        for user in uses.get(handle, ()):
+            text = user['text']
+            if text.startswith('call %dx.types.Handle @dx.op.annotateHandle(') and user['value'] in handles:
+                continue
+            if scope == 'cbuffer' and _STATIC_CB.fullmatch(text):
+                continue
+            if user['value'] in recognized_loads:
+                continue
+            errors.append((scope, f'材质句柄有未覆盖的消费者：{text}'))
+    return errors
+
+
 # 单个 Shader 的读取：record 为材质记录字节偏移（参数区与尾部字段），cbuffer 为静态 UserMaterial 偏移；
 # record_handles 为其值流入 createHandleFromHeap 的记录偏移。
 def _function_input_reads(ir, cbuffer_name):
@@ -83,12 +124,7 @@ def _function_input_reads(ir, cbuffer_name):
             if uses.get(user['value']):
                 result['cbuffer'].add(int(load[3]) * 16 + int(extract[1]) * lane_bytes)
     # 未识别的读取形式或句柄逃逸必须影响覆盖度，不能因正则未匹配就解释为没有读取。
-    for handle in static_cb:
-        for user in uses.get(handle, ()):
-            if '@dx.op.annotateHandle(' in user['text']:
-                continue
-            if not _STATIC_CB.fullmatch(user['text']):
-                result['errors'].append(('cbuffer', f'{cbuffer_name} 句柄有未支持的消费者：{user["text"]}'))
+    result['errors'].extend(_material_handle_gaps(definitions, uses, origins, recognized_loads, cbuffer_name))
     for value, row in definitions.items():
         if re.search(r'@dx.op\.(?:cbufferLoad|rawBufferLoad|bufferLoad)', row['text']):
             match = re.search(r'%dx.types.Handle (%[\w.]+)', row['text'])

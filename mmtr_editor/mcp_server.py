@@ -117,6 +117,16 @@ class VariantOptions(BaseModel):
     overwrite: bool = False
 
 
+class RemovalAction(BaseModel):
+    """P5 删除预检动作；执行删除仍需后续候选导出能力。"""
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['parameter', 'texture']
+    name: Name
+
+
+RemovalActions = Annotated[list[RemovalAction], Field(min_length=1, max_length=100)]
+
+
 # 所有 SDK 工作线程串行访问同一 Service；锁不交给 deepcopy，事务失败恢复整个文档状态。
 class WorkbenchSession:
     def __init__(self):
@@ -447,6 +457,16 @@ def create_server(session=None):
                 'counts': counts, 'failure_total': len(report['failures']), 'notes': report['notes'],
                 'total': len(rows), 'offset': offset, 'next_offset': end if end < len(rows) else None,
                 'items': rows[offset:end]}
+
+    @tool(job=True)
+    def workbench_removal_preview(actions: RemovalActions,
+            request_key: Annotated[str, Field(min_length=1, max_length=128)],
+            material_index: Index | None = None) -> dict[str, Any]:
+        """短调用启动只读删除预检；用 material_status/result 查询、material_cancel 取消。
+        验证已覆盖 DXIL 消费者及最终布局；不修改文档、不导出，不能作为运行时删除许可。
+        重试必须沿用相同 request_key、动作和材质；结果明确标记 deletion_supported=false。
+        """
+        return state.jobs.removal_preview([action.model_dump() for action in actions], material_index, request_key)
 
     @tool()
     def workbench_read_shader(index: Index, format: Literal['dxil', 'hlsl'] = 'dxil',

@@ -38,6 +38,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_list`|分页搜索 shaders、passes、metadata、materials、properties、textures|
 |`workbench_inspect`|单个 Shader/通道/材质详情，分页 binding/changes 或只读 structure 报告|
 |`workbench_usage`|只读统计全部 Shader 对所选 MDF 材质参数、纹理与 GPBF 的实际读取，分页返回|
+|`workbench_removal_preview`|短调用启动只读删除预检，复用 material_status/result/cancel；不执行删除|
 |`workbench_read_shader`|分页读取 DXIL 或受限重建 HLSL|
 |`workbench_export_shader`|另存完整 DXBC、DXIL、HLSL 或最近编译结果|
 |`workbench_compile`|从源码字符串或文件编译，可直接严格替换指定 Shader|
@@ -201,7 +202,9 @@ PS声明可以混有其它space的有限或无界SRV数组：这些声明保留�
 
 读取来源与地址迁移一致：heap 材质 CB、BindlessBuffer、UserMaterialInstances，另加静态绑定的 `UserMaterial` 常量缓冲与按名称绑定的纹理。无消费者的 `extractvalue` 不计入。每个函数独立解析 SSA；相同载荷只分析一次，但 `shader_count` 统计实际 Shader 条目。材质含 MMTRS（shader LOD 重定向）时，未按重定向证明的尾部偏移不归到具体字段，按名称证明的 SRV 仍可报告。缓存绑定 MMTR/MDF 字节、材质及 DXC 路径和内容，DLL 原路径被替换也会失效。
 
-此工具对应优化计划 P5 的前置只读报告，提前提供给现有 MCP；P3 后台任务与 P4 独立变体仍按原顺序推进。返回的 `coverage.scope=recognized_dxil_reads`、`coverage.deletion_supported=false` 明确限定范围。报告不等于完整消费者/采样分析，不证明实际运行分支、所有间接访问或安全删除；不得根据 `unused` 自动删接口。真实删除仍需 P5 的独立证明与验收。
+此工具对应优化计划 P5 的前置只读报告，已被 P3/P4 后续实现复用。返回的 `coverage.scope=recognized_dxil_reads`、`coverage.deletion_supported=false` 明确限定范围。报告不等于完整消费者/采样分析，不证明实际运行分支、所有间接访问或安全删除；不得根据 `unused` 自动删接口。真实删除仍需 P5 的独立证明与验收。
+
+`workbench_removal_preview` 在已知全部关联材质布局一致时启动只读后台任务。输入 `actions=[{"action":"parameter","name":"UnusedP"},{"action":"texture","name":"UnusedMap"}]`、非空 `request_key` 和可选 `material_index`，查询/取消复用现有材质任务接口。结果 `eligible=true` 只代表本档消费者证明通过；仍为 `deletion_supported=false`，不修改 MMTR/MDF、不提供删除导出。已用、仅读取描述符、未知访问、句柄逃逸、跨函数调用和 MMTRS 阻止资格。逐 Shader 身份、失败与最终收缩布局见分页结果；字段映射和后续写回验收见[删除边界](material-removal.md)。
 
 2026-10-21 的 PR #3 整合验证：核心 330 项中 242 通过、88 项可选语料跳过，MCP 19 项通过，前端 17 项通过/1 项缺 fixture 跳过，TypeScript/Vite 构建通过。自有 HLSL 通过隔离 DXC 验证 shl 步长和常量地址在参数/纹理混合批次后的实际读取。固定 P0 Stocking 输入的真实源码 stdio 查询首次约 15.40 秒，后续分页约 0.04 秒；报告识别 164 个参数、21 个纹理、4 个 GPBF 有读取，11 个参数为 unknown，整体覆盖未完成，不能推断这些参数未使用。会话 revision、文档状态与输入文件字节均保持不变。证据仅限源码/CPU/DXC；未验收冻结包、GPU 或游戏效果。本地复现记录位于忽略的 `output/pr3-*`，不是线上附件。
 

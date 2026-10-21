@@ -33,7 +33,7 @@ class MaterialTailLayout:
 
 
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
-def material_reads(ir):
+def material_reads(ir, *, include_static=False):
     definitions, uses, _ = parse(ir)
     origins = handle_sources(ir, definitions)
     for row in definitions.values():
@@ -57,6 +57,8 @@ def material_reads(ir):
         name = origin.get('binding', {}).get('name')
         if name in ('BindlessBuffer', 'UserMaterialInstances'):
             handles[key] = 'raw' if name == 'BindlessBuffer' else 'instance'
+        elif include_static and name == 'UserMaterial' and origin.get('binding', {}).get('resource_class') == 2:
+            handles[key] = 'static'
     result = []
     for value, row in definitions.items():
         text = row['text']
@@ -70,7 +72,7 @@ def material_reads(ir):
         # 自定义Shader可直接按float读取同一材质CB；地址证明和字段迁移与整数读取相同。
         cb = re.fullmatch(r'call %dx\.types\.CBufRet\.(i32|f32) @dx\.op\.cbufferLoadLegacy\.\1\(i32 59, %dx.types.Handle %\w+, i32 (\d+)\)', text)
         raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle %\w+, i32 (%\w+|\d+), i32 (0|undef), i8 (\d+), i32 4\)', text)
-        if cb and kind == 'cb':
+        if cb and kind in ('cb', 'static'):
             register = int(cb[2])
         elif raw and raw[1].isdigit():
             # 常量地址只接受参数实例流的0号实例（计算Shader常见）；是否越过参数区由迁移按布局判断。
@@ -115,11 +117,15 @@ def material_reads(ir):
 
 
 # 仅重写经来源证明的读取和参数实例步长；保留所有原计算/控制流，用新命名SSA避免重排编号。
-def relocate_material_reads(ir, old, new, *, reads=None):
-    if old.parameter_bytes % 16 or new.parameter_bytes % 16 or new.parameter_bytes < old.parameter_bytes:
+def relocate_material_reads(ir, old, new, *, reads=None, relocation=None):
+    if old.parameter_bytes % 16 or new.parameter_bytes % 16 or (new.parameter_bytes < old.parameter_bytes and relocation is None):
         raise ValueError('只接受16字节对齐的参数区末尾扩容。')
-    reads = material_reads(ir) if reads is None else reads
+    if relocation is not None and (relocation.old != old or relocation.new != new):
+        raise ValueError('删除地址映射与源/最终布局不一致。')
+    reads = material_reads(ir, include_static=relocation is not None) if reads is None else reads
+    uses = parse(ir)[1] if relocation is not None else None
     replacements, changes, strides = {}, [], {}
+    expected = {}
     # 每个SSA只索引一次，按行构造候选；不为每处迁移全文搜索/替换。
     lines = ir.splitlines(keepends=True)
     anchors = {}
@@ -140,12 +146,21 @@ def relocate_material_reads(ir, old, new, *, reads=None):
     # 同一会话可连续追加纹理和参数；前一次生成的SSA仍在IR中，后续必须分配新名称。
     used_names = set(re.findall(r'^\s*(%\w+)\s*=', ir, re.M))
     for read in reads:
-        if read['kind'] == 'instance' and read['stride'] is None:
+        extracts = read['extracts']
+        if relocation is not None:
+            for extract in extracts:
+                if not uses.get(extract['ssa']):
+                    replacements[anchor(extract['ssa'])[0]] = ''
+            extracts = [extract for extract in extracts if uses.get(extract['ssa'])]
+            if not extracts:
+                replacements[anchor(read['ssa'])[0]] = ''
+                continue
+        if read['kind'] == 'instance' and read['stride'] is None and relocation is None:
             # 常量地址：参数不移动，只要读取仍在原参数区内即无需改写；越界可能是折叠后的非0实例，拒绝。
             if any(ex['offset'] >= old.parameter_bytes for ex in read['extracts']):
                 raise ValueError('参数实例常量地址超出原参数区，无法证明实例编号。')
             continue
-        if read['kind'] == 'instance':
+        if read['kind'] == 'instance' and read['stride'] is not None:
             stride = read['stride']
             if stride['bytes'] != old.parameter_bytes:
                 raise ValueError('实例步长与原参数区尺寸不一致。')
@@ -155,12 +170,14 @@ def relocate_material_reads(ir, old, new, *, reads=None):
                 line_index, _ = anchor(address)
                 replacements[line_index] = f'  {address} = ' + read['address_rhs'].replace('or ', 'add ', 1)
         wanted = {}
-        for ex in read['extracts']:
-            if read['kind'] == 'instance':
+        for ex in extracts:
+            if read['kind'] == 'instance' and relocation is None:
                 if ex['offset'] >= old.parameter_bytes:
                     raise ValueError('参数实例流出现尾部资源读取，需单独证明其步长。')
                 continue
-            target = old.offset_in(ex['offset'], new)
+            target = (relocation.offset_in(ex['offset'], instance=read['kind'] in ('instance', 'static'))
+                      if relocation is not None else old.offset_in(ex['offset'], new))
+            expected[ex['ssa']] = target
             if target != ex['offset']:
                 wanted[ex['ssa']] = (ex, target)
         if not wanted:
@@ -175,15 +192,18 @@ def relocate_material_reads(ir, old, new, *, reads=None):
                 name = f'{stem}_{suffix}'
             used_names.update((name, name + 'addr'))
             group_names[reg] = name
-            if read['kind'] == 'cb':
+            if read['kind'] in ('cb', 'static'):
                 text = re.sub(r'i32 \d+\)$', f'i32 {reg})', read['text'])
+            elif read['kind'] == 'instance' and read['stride'] is None:
+                text = read['text'].replace(f'i32 {read["raw"][0]},', f'i32 {reg*16},')
             else:
                 address = name + 'addr'
-                additions.append(f'  {address} = add i32 {read["base"]}, {reg}')
+                additions.append(f'  {address} = add i32 {read["base"]}, {reg*16 if read["kind"] == "instance" else reg}')
                 text = read['text'].replace(f'i32 {read["raw"][0]},', f'i32 {address},')
             additions.append(f'  {name} = {text}')
         line_index, line = anchor(read['ssa'])
-        replacements[line_index] = line + '\n' + '\n'.join(additions)
+        keep = line+'\n' if relocation is None or len(wanted) < len(extracts) else ''
+        replacements[line_index] = keep+'\n'.join(additions)
         for ssa, (ex, target) in wanted.items():
             pattern = r'^  ' + re.escape(ssa) + r' = extractvalue (.*) ' + re.escape(read['ssa']) + r', [0-3](?:  ;.*)?$'
             line_index, line = anchor(ssa)
@@ -209,7 +229,16 @@ def relocate_material_reads(ir, old, new, *, reads=None):
     ir = ''.join(replacements[i] + '\n' if i in replacements else line for i, line in enumerate(lines))
     # 独立解析迁移后的取值源，不以计划替代实际文本。
     before = {ex['ssa']: ex['offset'] for read in reads if read['kind'] != 'instance' for ex in read['extracts']}
-    after_reads = material_reads(ir)
+    after_reads = material_reads(ir, include_static=relocation is not None)
+    if relocation is not None:
+        actual = {ex['ssa']: ex['offset'] for read in after_reads for ex in read['extracts']}
+        if any(actual.get(ssa) != target for ssa, target in expected.items()):
+            raise ValueError('删除迁移后的取值没有对应保留字段的新地址。')
+        if any(read['stride'] and read['stride']['bytes'] != new.parameter_bytes
+               for read in after_reads if read['kind'] == 'instance'):
+            raise ValueError('删除迁移后的实例步长不一致。')
+        return ir, {'loads': len(reads), 'relocated_extracts': changes,
+                    'instance_stride_ssa': sorted(strides), 'new_stride': new.parameter_bytes}
     after = {ex['ssa']: ex['offset'] for read in after_reads if read['kind'] != 'instance' for ex in read['extracts']}
     if any(after.get(ssa) != old.offset_in(offset, new) for ssa, offset in before.items()):
         raise ValueError('实际IR中的原取值SSA没有迁移到预期逻辑字段。')

@@ -475,6 +475,9 @@ class RpcSession:
             if 'dll' in request and request['dll'] != self.dll:
                 self.dll = request['dll']
                 self.revision += 1
+            if op == 'material_removal_preview':
+                return self.jobs.removal_preview(request.get('actions'), request.get('material_index'),
+                                                 request.get('request_key'))
             if op == 'material_job_preview':
                 return self.jobs.preview(request.get('actions'), request.get('record_index'), variant=request.get('variant'))
             if op == 'material_job_submit':

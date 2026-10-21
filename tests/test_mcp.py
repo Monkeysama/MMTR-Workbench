@@ -40,9 +40,10 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 30)
+        self.assertEqual(len(tools), 31)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_removal_preview'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_material_status'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_submit'].annotations.read_only_hint)
         self.assertFalse(tools['workbench_material_cancel'].annotations.read_only_hint)
@@ -156,6 +157,49 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
             dll.write_bytes(b'replaced at same path')
             await self.call('usage')
         self.assertEqual(calls, ['mmtr_material_usage', 'mmtr_material_usage'])
+
+    async def test_removal_preview_uses_background_owner_and_preserves_revision(self):
+        from threading import Event
+        from mmtr_editor.model import Document
+        from mmtr_editor.material_removal_service import prepare_removal_preview
+        self.state.service.doc = Document(mmtr_fixture(), Path('MaterialShader/test.mmtr.240906211'))
+        self.state.service.mdf_selected = 0
+        dll = self.root/'removal.dll'
+        dll.write_bytes(b'identity only')
+        self.state.dll = str(dll)
+        revision = self.state.revision
+        before = self.state.service.doc.build()[0], self.state.service.mdf.build()[0]
+        entered, release = Event(), Event()
+        self.addCleanup(release.set)
+
+        def analyze(service, dll, actions, index, source_revision, *, worker_control):
+            plan, _ = prepare_removal_preview(service, dll, actions, index, source_revision)
+            entered.set()
+            release.wait(3)
+            worker_control.check()
+            return {'plan': plan, 'eligible': False, 'shaders': [dict(shader_index=0, eligible=False)],
+                    'failures': [dict(error='used texture')], 'coverage': {'deletion_supported': False}}
+
+        args = dict(actions=[dict(action='texture', name='BaseMap')], request_key='remove-test')
+        with patch('mmtr_editor.material_jobs.analyze_removal_preview', side_effect=analyze):
+            job = await self.call('removal_preview', **args)
+            self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+            status = await self.call('material_status', job_id=job['job_id'])
+            self.assertEqual(status['scope'], 'readonly_analysis')
+            self.assertEqual((await self.call('status'))['revision'], revision)
+            self.assertEqual((await self.call('removal_preview', **args))['job_id'], job['job_id'])
+            release.set()
+            for _ in range(200):
+                status = await self.call('material_status', job_id=job['job_id'])
+                if status['state'] in ('succeeded', 'failed', 'stale', 'cancelled'):
+                    break
+                await asyncio.sleep(.01)
+            self.assertEqual(status['state'], 'succeeded', status)
+            result = await self.call('material_result', job_id=job['job_id'], limit=1)
+            self.assertFalse(result['result']['eligible'])
+            self.assertFalse(result['result']['coverage']['deletion_supported'])
+            self.assertEqual(self.state.revision, revision)
+            self.assertEqual(before, (self.state.service.doc.build()[0], self.state.service.mdf.build()[0]))
 
     async def test_usage_rejects_dxc_changing_during_worker(self):
         dll = self.root/'changing.dll'

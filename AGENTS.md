@@ -28,6 +28,7 @@
 
 ## Git 与提交
 
+- 用户当前要求直接在本地 `main` 按 P1–P6 推进；不创建新分支，不使用 `codex/` 前缀。未获新授权不推送、打 tag 或触发云端发布。
 - 每个阶段完成实现与验证后及时单独提交，不把多个阶段长期堆积为一个提交；提交写明该阶段范围、验证及剩余限制。
 - 提交使用 Conventional Commits：`type(scope): description`，scope 可省略，破坏性改动用 `!` 并在正文说明。描述语言随意，必须使用 ASCII 冒号加空格。
 - 常见类型：feat、fix、docs、refactor、test、build、ci、chore、perf、style、revert。示例：`feat(mcp): 新增材质引用编辑`、`fix(mdf): preserve shared strings`。

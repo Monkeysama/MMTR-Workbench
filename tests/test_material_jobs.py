@@ -102,6 +102,69 @@ class MaterialJobTests(unittest.TestCase):
             with self.assertRaisesRegex(EditError, '历史已满'):
                 self.submit('full')
 
+    def test_removal_analysis_is_readonly_paged_cancellable_and_deduplicated(self):
+        actions = [{'action': 'texture', 'name': 'BaseMap'}]
+        before = self.owner.service.doc.build()[0], self.owner.service.mdf.build()[0]
+
+        def analyze(service, dll, actions, material_index, revision, *, worker_control):
+            from mmtr_editor.material_removal_service import prepare_removal_preview
+            plan, _ = prepare_removal_preview(service, dll, actions, material_index, revision)
+            worker_control.progress(stage='analyzing_removal', completed=2, total=10)
+            self.entered.set()
+            self.release.wait(3)
+            worker_control.check()
+            return {'plan': plan, 'shaders': [dict(shader_index=i) for i in range(6)], 'failures': [],
+                    'eligible': True, 'coverage': {'deletion_supported': False}}
+
+        with patch('mmtr_editor.material_jobs.analyze_removal_preview', side_effect=analyze) as compute:
+            job = self.jobs.removal_preview(actions, 0, 'removal')
+            self.assertTrue(self.entered.wait(2))
+            self.assertEqual(self.jobs.status(job['job_id'])['scope'], 'readonly_analysis')
+            self.assertEqual(self.jobs.status(job['job_id'])['completed'], 2)
+            self.assertEqual(self.jobs.removal_preview(actions, 0, 'removal')['job_id'], job['job_id'])
+            with self.assertRaisesRegex(EditError, '相同 request_key'):
+                self.jobs.removal_preview(actions, 1, 'removal')
+            with self.assertRaisesRegex(EditError, '已有运行中'):
+                self.submit('another')
+            self.release.set()
+            self.assertEqual(self.wait(job)['state'], 'succeeded')
+            self.assertEqual(compute.call_count, 1)
+            page = self.jobs.result(job['job_id'], 1, 2)['result']
+            self.assertEqual([s['shader_index'] for s in page['shaders']], [1, 2])
+            self.assertEqual((page['shaders_total'], page['shaders_next_offset']), (6, 3))
+            self.assertEqual(self.owner.revision, 3)
+            self.assertEqual(before, (self.owner.service.doc.build()[0], self.owner.service.mdf.build()[0]))
+            self.assertFalse(self.jobs.status(job['job_id'])['candidate_available'])
+
+    def test_removal_dxc_source_change_and_cancel_do_not_publish_analysis(self):
+        actions = [{'action': 'texture', 'name': 'BaseMap'}]
+        for mode in ('source', 'dxc', 'cancel'):
+            self.entered.clear()
+            self.release.clear()
+
+            def analyze(service, dll, actions, material_index, revision, *, worker_control):
+                from mmtr_editor.material_removal_service import prepare_removal_preview
+                plan, _ = prepare_removal_preview(service, dll, actions, material_index, revision)
+                self.entered.set()
+                self.release.wait(3)
+                worker_control.check()
+                return {'plan': plan, 'shaders': [], 'failures': []}
+
+            with self.subTest(mode=mode), patch('mmtr_editor.material_jobs.analyze_removal_preview', side_effect=analyze):
+                job = self.jobs.removal_preview(actions, 0, mode)
+                self.assertTrue(self.entered.wait(2))
+                if mode == 'source':
+                    self.owner.service.mdf.set_property(0, 'Value', [0.375])
+                elif mode == 'dxc':
+                    self.dll.write_bytes(b'changed during analysis')
+                else:
+                    self.jobs.cancel(job['job_id'])
+                self.release.set()
+                self.assertEqual(self.wait(job)['state'], 'cancelled' if mode == 'cancel' else 'stale')
+                with self.assertRaises(EditError):
+                    self.jobs.result(job['job_id'])
+                self.assertEqual(self.owner.revision, 3)
+
     def test_cancel_preserves_source_and_close_reaps_thread(self):
         before = self.owner.service.doc.build()[0], self.owner.service.mdf.build()[0]
         with patch('mmtr_editor.material_jobs.apply_material_batch', side_effect=self.fake_apply):

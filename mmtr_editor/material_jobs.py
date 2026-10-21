@@ -15,6 +15,7 @@ import uuid
 from .material_control import MaterialCancelled, WorkerControl
 from .material_plan import dll_identity
 from .material_service import apply_material_batch, prepare_material_batch
+from .material_removal_service import analyze_removal_preview, prepare_removal_preview
 from .model import EditError
 
 TERMINAL = frozenset(('succeeded', 'failed', 'cancelled', 'stale'))
@@ -47,6 +48,7 @@ class _Job:
     variant_plan: object | None = None
     variant_candidate: object | None = None
     exported: dict | None = None
+    operation: str = 'extend'
 
 
 class MaterialJobs:
@@ -85,13 +87,22 @@ class MaterialJobs:
 
     # 先核对幂等键，再检查当前源；成功后重试不会因新增名称已存在而重新执行。
     def submit(self, actions, record_index, expected_plan, request_key, *, variant=None):
+        return self._submit(actions, record_index, expected_plan, request_key, variant=variant)
+
+    def removal_preview(self, actions, material_index, request_key):
+        """短调用快照并启动只读消费者证明；与修改任务共享取消、去重及会话生命周期。"""
+        return self._submit(actions, None, None, request_key, operation='removal_preview',
+                            material_index=material_index)
+
+    def _submit(self, actions, record_index, expected_plan, request_key, *, variant=None,
+                operation='extend', material_index=None):
         if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128 or not request_key.strip():
             raise EditError('request_key 必须是 1..128 字符的非空字符串。')
-        if not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan):
+        if operation == 'extend' and (not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan)):
             raise EditError('expected_plan 必须是预览返回的计划 digest。')
         try:
             encoded = json.dumps(dict(actions=actions, record_index=record_index, expected_plan=expected_plan,
-                                      variant=variant),
+                                      variant=variant, operation=operation, material_index=material_index),
                                  sort_keys=True, ensure_ascii=True, allow_nan=False)
             request = json.loads(encoded)  # 调用方之后改动列表不能改变本次请求。
         except (TypeError, ValueError) as exc:
@@ -115,14 +126,19 @@ class MaterialJobs:
                     raise EditError('会话任务历史已满；请另开会话，不会淘汰旧请求键后重复执行。')
             candidate = deepcopy(self.owner.service)
             dll = self.owner.dll
-            plan, report = self._prepare(candidate, dll, request['actions'], record_index,
-                                         self.owner.revision, request['variant'])
-            if report['digest'] != expected_plan:
+            if operation == 'removal_preview':
+                report, _ = prepare_removal_preview(candidate, dll, request['actions'],
+                                                    material_index, self.owner.revision)
+                plan = None
+            else:
+                plan, report = self._prepare(candidate, dll, request['actions'], record_index,
+                                             self.owner.revision, request['variant'])
+            if operation == 'extend' and report['digest'] != expected_plan:
                 raise EditError('计划身份已改变，必须重新预览。')
             source = (str(candidate.doc.source), str(candidate.mdf.source), candidate.mdf_selected, str(dll))
             control = WorkerControl()
             job = _Job(request_key, identity, report, control,
-                       variant_plan=plan if request['variant'] is not None else None)
+                       variant_plan=plan if request['variant'] is not None else None, operation=operation)
             control.progress = lambda **values: self._progress(job, **values)
             job.thread = Thread(target=self._run, args=(job, candidate, dll, request, source),
                                 name='mmtr-material-'+job.id[:8], daemon=True)
@@ -154,7 +170,12 @@ class MaterialJobs:
                 job.control.check()
                 job.state, job.stage = 'running', 'preparing'
             variant_candidate = None
-            if job.variant_plan is not None:
+            if job.operation == 'removal_preview':
+                result = analyze_removal_preview(candidate, dll, request['actions'],
+                    job.plan['selected_material'], job.plan['source_revision'], worker_control=job.control)
+                if result['plan']['digest'] != job.plan['digest']:
+                    raise _StaleCandidate('删除预检的快照计划已改变，结果已丢弃。')
+            elif job.variant_plan is not None:
                 from .material_variant import build_material_variant
                 variant_candidate = build_material_variant(candidate, dll, request['actions'],
                     request['record_index'], job.variant_plan, worker_control=job.control)
@@ -174,7 +195,7 @@ class MaterialJobs:
                     raise _StaleCandidate('源文档、所选材质或 DXC 已改变，候选已丢弃；请重新预览。')
                 with self.lock:
                     job.control.check()
-                    if variant_candidate is None:
+                    if variant_candidate is None and job.operation != 'removal_preview':
                         service.doc, service.mdf = candidate.doc, candidate.mdf
                         service.mdf_link_doc = service.mdf_link_report = service.mdf_migration = None
                         self.owner.revision += 1
@@ -206,7 +227,9 @@ class MaterialJobs:
             stage=job.stage, completed=job.completed, total=job.total, worker_pid=job.worker_pid,
             elapsed_seconds=(job.ended or time.monotonic())-job.started, source_revision=job.plan['source_revision'],
             committed_revision=job.committed_revision, error=job.error, details=job.details,
-            scope='independent_variant' if job.variant_plan is not None else 'shared_master',
+            operation=job.operation,
+            scope='readonly_analysis' if job.operation == 'removal_preview' else
+                  'independent_variant' if job.variant_plan is not None else 'shared_master',
             candidate_available=job.variant_candidate is not None, exported=job.exported is not None)
 
     # 导出只在调用方显式请求后执行；候选最多保留一份，不将二进制塞进历史/协议结果。
@@ -267,6 +290,15 @@ class MaterialJobs:
             job = self._get(job_id)
             if job.state != 'succeeded':
                 raise EditError(f'任务尚无可提交结果（{job.state}）：{job.error or job.stage}')
+            if job.operation == 'removal_preview':
+                # 最大的列表是逐Shader证据；详细字偏移只在自身Shader页面中返回。
+                result = {k: deepcopy(v) for k, v in job.result.items() if k not in ('shaders', 'failures')}
+                for name in ('shaders', 'failures'):
+                    rows = job.result[name]
+                    result[name] = deepcopy(rows[offset:offset+limit])
+                    result[name+'_total'] = len(rows)
+                    result[name+'_next_offset'] = offset+limit if offset+limit < len(rows) else None
+                return {**self._status(job), 'result': result}
             # 限制最大的 Shader 列表；计划最多100动作，不递归截断默认值/布局字段。
             report = job.result['interface_sync']
             rows = report['shader_reports']
