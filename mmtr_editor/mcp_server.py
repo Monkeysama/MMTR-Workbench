@@ -478,6 +478,12 @@ def create_server(session=None):
                                          expected_plan, request_key, variant=None if variant is None else variant.model_dump())
 
     @tool()
+    def workbench_effect_template(name: Literal['emission_multiplier']) -> dict[str, Any]:
+        """返回已验证范围内的效果模板合同；不修改 MMTR/MDF，不编译或宣称游戏效果通过。"""
+        from .effect_templates import effect_template
+        return effect_template(name)
+
+    @tool()
     def workbench_read_shader(index: Index, format: Literal['dxil', 'hlsl'] = 'dxil',
                               offset_line: Index = 0,
                               limit: Annotated[int, Field(ge=1, le=200)] = 100) -> dict[str, Any]:

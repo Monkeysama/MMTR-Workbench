@@ -40,7 +40,7 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_schemas_and_annotations(self):
         tools = {t.name: t for t in await self.server.list_tools()}
-        self.assertEqual(len(tools), 32)
+        self.assertEqual(len(tools), 33)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_removal_preview'].annotations.read_only_hint)
@@ -55,6 +55,9 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tools['workbench_reset'].annotations.destructive_hint)
         self.assertTrue(tools['workbench_export'].annotations.open_world_hint)
         self.assertTrue(all(t.output_schema for t in tools.values()))
+        template = await self.call('effect_template', name='emission_multiplier')
+        self.assertEqual(template['actions'][0]['name'], 'MMTR_EmissionStrength')
+        self.assertTrue(template['requires_compiled_shader'])
         schema = tools['workbench_edit_mdf'].input_schema
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
