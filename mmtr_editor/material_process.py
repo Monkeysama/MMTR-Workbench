@@ -74,6 +74,11 @@ def run_material_task(document, operation, dll, *, timeout=300, **arguments):
 def extend_in_worker(document, material, dll, **arguments):
     from .mdf import _public_data
     result = run_material_task(document, 'extend', dll, material=_public_data(material), **arguments)
+    from .material_plan import dll_identity
+    proof = result['report'].get('plan')
+    if (not proof or proof['dxc_sha256'] != dll_identity(dll)
+            or (arguments.get('expected_plan') and proof['digest'] != arguments['expected_plan'])):
+        raise EditError('隔离进程返回的计划或 DXC 身份不一致。')
     candidate = restore_document(result['document'])
     if (candidate.source != document.source or candidate.original != document.original
             or candidate.renames != document.renames or candidate.redirects != document.redirects):

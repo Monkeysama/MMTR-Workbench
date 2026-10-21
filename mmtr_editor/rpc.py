@@ -179,6 +179,12 @@ class Service:
             from .structure import document_structure
             return document_structure(self.doc).report(req.get('view', 'summary'), req.get('index'),
                                                       int(req.get('offset', 0)), int(req.get('limit', 40)))
+        if op in ('material_plan', 'material_apply'):
+            from .material_service import prepare_material_batch, apply_material_batch
+            arguments = (self, req['dll'], req.get('actions'), req.get('record_index'), req.get('source_revision', 0))
+            if op == 'material_plan':
+                return prepare_material_batch(*arguments)[0].report()
+            return apply_material_batch(*arguments, expected_plan=req.get('expected_plan'))
         if op == 'mmtr_validate_interfaces':
             if self.doc is None:
                 raise EditError('请先打开 MMTR。')
