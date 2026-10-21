@@ -4,14 +4,17 @@
 调用方提供关联MDF的布局证明；未知IR、阶段或绑定不猜测，不接触游戏文件。
 """
 import copy
+from collections import OrderedDict
 import hashlib
 import re
 import struct
+import time
 
 from inspect_mmtr import decode_dxbc, inspect_data, reflection
 from mmtr_editor.hashes import murmur3_x86_32
 from .material_addresses import MaterialTailLayout, material_reads, relocate_material_reads
 from .model import Document, EditError, interface_chunks
+from .dxil_sources import parse, handle_sources
 
 
 # 拆分完整容器；只重建明确修改的chunk，STAT必须来自修改后的反射模块。
@@ -90,6 +93,35 @@ def append_texture_declaration(nodes, table, texture, node):
     return register
 
 
+# 只修改来源可证明的 UserMaterial 句柄；同尺寸的其它 CB 不能随参数追加一起变大。
+# SSA 在不同函数内可重名，必须逐函数追溯，不能用全文件最后一个定义覆盖前面的来源。
+def patch_material_properties(ir, old_size, new_size):
+    marker = f'%dx.types.ResourceProperties {{ i32 13, i32 {old_size} }}'
+    if marker not in ir:
+        return ir
+    bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
+
+    def function(match):
+        body = match[0]
+        if marker not in body:
+            return body
+        definitions, _, _ = parse(body)
+        origins = handle_sources(bindings+'\n'+body, definitions)
+        lines = body.splitlines()
+        for value, row in definitions.items():
+            if marker not in row['text'] or not row['text'].startswith('call %dx.types.Handle @dx.op.annotateHandle('):
+                continue
+            origin = origins.get(value, {})
+            if origin.get('kind') != 'named-resource':
+                raise EditError('无法证明同尺寸常量缓冲注解的资源身份，拒绝修改。')
+            if origin['binding']['name'] == 'UserMaterial':
+                lines[row['line']-1] = lines[row['line']-1].replace(marker,
+                    f'%dx.types.ResourceProperties {{ i32 13, i32 {new_size} }}')
+        return '\n'.join(lines)
+
+    return re.sub(r'^define .*?^}', function, ir, flags=re.M | re.S)
+
+
 # 修改声明、类型注解和资源尺寸，不向渲染算式加入新增字段的消费者。
 def patch_declarations(ir, old_size, new_size, parameter=None, texture=None):
     nodes = dict(re.findall(r'^!(\d+) = (.*)$', ir, re.M))
@@ -130,8 +162,7 @@ def patch_declarations(ir, old_size, new_size, parameter=None, texture=None):
         # 可执行DXIL可能已剥离类型注解；STAT模块必须独立重建并在编译后核对变量。
         if sizes != 1 or annotations > 1:
             raise EditError('缺少唯一UserMaterial反射注解，不能扩展。')
-        ir = ir.replace(f'%dx.types.ResourceProperties {{ i32 13, i32 {old_size} }}',
-                        f'%dx.types.ResourceProperties {{ i32 13, i32 {new_size} }}')
+        ir = patch_material_properties(ir, old_size, new_size)
     register = None
     if texture:
         root = re.search(r'^!dx.resources = !\{!(\d+)\}$', ir, re.M)
@@ -162,48 +193,53 @@ def append_metadata(data, source, operation):
         prefix.extend(raw)
         return at
 
-    parameter = operation.get('parameter')
-    if parameter:
+    parameters = operation.get('parameters', [operation['parameter']] if operation.get('parameter') else [])
+    if parameters:
         entries = [cb for cb in info['metadata']['cbuffers'] if cb['name'] == 'UserMaterial']
         first = entries[0]
-        name = parameter['name']
-        name_at = append(name.encode('ascii')+b'\0', 1)
         members = data[first['members_offset']:first['members_offset']+first['member_count']*16]
-        members += struct.pack('<QIHH', name_at, murmur3_x86_32(name.encode('ascii'), 0xffffffff),
-                               parameter['byte_offset'], parameter['byte_size'])
+        for parameter in parameters:
+            name = parameter['name']
+            name_at = append(name.encode('ascii')+b'\0', 1)
+            members += struct.pack('<QIHH', name_at, murmur3_x86_32(name.encode('ascii'), 0xffffffff),
+                                   parameter['byte_offset'], parameter['byte_size'])
         at = append(members)
         for cb in entries:
-            struct.pack_into('<IIQ', prefix, cb['offset']+16, operation['new_size'], first['member_count']+1, at)
-    texture = operation.get('texture')
-    if texture:
-        name_at = append(texture.encode('ascii')+b'\0', 1)
+            struct.pack_into('<IIQ', prefix, cb['offset']+16, operation['new_size'], first['member_count']+len(parameters), at)
+    textures = operation.get('textures_added', [operation['texture']] if operation.get('texture') else [])
+    if textures:
+        name_addresses = [append(name.encode('ascii')+b'\0', 1) for name in textures]
         for group in operation['tables']:
             records = [info['records'][i] for i in group['records']]
             offsets = records[0]['metadata_tables']['srvs']
             table = b''.join(data[pos:pos+16] for pos in offsets)
-            table += struct.pack('<QII', name_at, murmur3_x86_32(texture.encode('ascii'), 0xffffffff), 0)
+            table += b''.join(struct.pack('<QII', at, murmur3_x86_32(name.encode('ascii'), 0xffffffff), 0)
+                              for name, at in zip(textures, name_addresses))
             table_at, binding_tables = append(table), {}
             for record in records:
                 if record['metadata_tables']['srvs'] != offsets:
                     raise EditError('共享SRV名称表在事务中发生变化。')
                 old_binding = struct.unpack_from('<Q', data, record['offset']+0x88)[0]
                 register = group['registers'][str(record['index'])]
+                register = (register,) if isinstance(register, int) else tuple(register)
+                if len(register) != len(textures) or any(type(r) is not int or not 0 <= r <= 255 for r in register):
+                    raise EditError('新增纹理寄存器必须处于已验证的8位PS绑定范围。')
                 key = (old_binding, register)
                 if not 0 < old_binding < info['shader_start'] or old_binding+len(offsets)*8 > info['shader_start']:
                     raise EditError('原SRV绑定映射表越界。')
                 if key not in binding_tables:
                     binding_tables[key] = append(data[old_binding:old_binding+len(offsets)*8]
-                                                  + struct.pack('<II', 0, 0x02100000 | register), 4)
+                                                  + b''.join(struct.pack('<II', 0, 0x02100000 | r) for r in register), 4)
                 base = record['offset']
                 total = struct.unpack_from('<I', data, base+0xd4)[0]
                 if total != sum(sum(x) for x in record['per_stage_counts_raw'].values()):
                     raise EditError('原MMTR全阶段资源总数不一致。')
-                if prefix[base+0xfc] >= 255 or prefix[base+0xe8] >= 255:
+                if prefix[base+0xfc]+len(textures) > 255 or prefix[base+0xe8]+len(textures) > 255:
                     raise EditError('SRV数量超出单字节范围。')
                 struct.pack_into('<QQ', prefix, base+0x88, binding_tables[key], table_at)
-                prefix[base+0xfc] += 1
-                prefix[base+0xe8] += 1
-                struct.pack_into('<I', prefix, base+0xd4, total+1)
+                prefix[base+0xfc] += len(textures)
+                prefix[base+0xe8] += len(textures)
+                struct.pack_into('<I', prefix, base+0xd4, total+len(textures))
     delta = len(prefix)-info['shader_start']
     struct.pack_into('<Q', prefix, 8, len(prefix))
     for record in info['records']:
@@ -267,70 +303,116 @@ def texture_tables(document, layout, record_index):
     if not any(record_index in records for records in tables.values()):
         raise EditError('所选记录未使用关联MDF纹理表，请选择材质绘制记录。')
     selected = {i for records in tables.values() for i in records}
-    for record in info['records']:
-        if any(ref['shader_index'] in shaders for ref in record['shader_references']) and record['index'] not in selected:
-            raise EditError('材质PS被其它未识别资源表共享，不能局部扩展。')
+    from .structure import document_structure
+    shared = document_structure(document).shader_users
+    if any(use.program not in selected for index in shaders for use in shared[index]):
+        raise EditError('材质PS被其它未识别资源表共享，不能局部扩展。')
     return tables, shaders
 
 
-# 一次新增一种接口；任何编译、映射或完整性检查失败都保留调用方原状态。
-def extend_material_interface(document, material, dll, *, parameter=None, texture=None, record_index=None):
+# 旧单项入口只包装一个计划动作，与批量共用一次迁移/编译路径。
+def extend_material_interface(document, material, dll, *, parameter=None, texture=None, record_index=None,
+                              actions=None, plan_context=None, expected_plan=None):
     from .dxil_assembly import DxilAssembly
-    if bool(parameter) == bool(texture):
-        raise EditError('一次只能新增一个参数或纹理接口。')
-    name = parameter['name'] if parameter else texture
-    if not re.fullmatch(r'[A-Za-z_]\w*', name, re.ASCII):
-        raise EditError('新增接口名称必须是ASCII标识符。')
-    if any(op['kind'] != 'extend_material_interface' for op in document.metadata_edits):
-        raise EditError('请先完成或重置已有手动metadata修改，再自动扩展材质接口。')
-    old = current_layout(document, material)
+    from .material_plan import plan_material_edit, dll_identity
+    if actions is None:
+        if bool(parameter) == bool(texture):
+            raise EditError('一次只能新增一个参数或纹理接口。')
+        actions = ([dict(action='parameter', **parameter)] if parameter else
+                   [dict(action='texture', name=texture)])
+    elif parameter or texture:
+        raise EditError('批量动作不能与旧单项参数混用。')
+    started = time.perf_counter()
+    plan = plan_material_edit(document, material, dll, actions, record_index, **(plan_context or {}))
+    if expected_plan is not None and plan.digest != expected_plan:
+        raise EditError('计划身份已改变，必须重新规划。')
+    plan_digest = plan.digest
+    old, new = plan.old, plan.new
+    new_size = new.parameter_bytes
+    parameters = [p.declaration() for p in plan.parameters]
+    textures = [t.name for t in plan.textures]
     info = document.current_info()
     original_data = document.build()[0]
-    tables, texture_shaders = {}, set()
-    new_size = old.parameter_bytes
-    if parameter:
-        if parameter['byte_size'] not in (4, 8, 12, 16) or parameter['byte_offset'] != old.parameter_bytes:
-            raise EditError('自动扩展支持4/8/12/16字节参数，偏移必须等于当前UserMaterial大小。')
-        if any(m['name'] == name for cb in info['metadata']['cbuffers'] if cb['name'] == 'UserMaterial' for m in cb['members']):
-            raise EditError(f'MMTR参数已存在：{name}')
-        new_size = (parameter['byte_offset']+parameter['byte_size']+15) & ~15
-        if new_size > 0xffff:
-            raise EditError('UserMaterial超过16位布局范围。')
-    else:
-        if name in old.texture_names+old.gpbf_names or any(e['name'] == name for e in info['metadata']['srvs']):
-            raise EditError(f'MMTR资源已存在：{name}')
-        tables, texture_shaders = texture_tables(document, old, record_index)
-    new = MaterialTailLayout(new_size, old.texture_names+((texture,) if texture else ()), old.gpbf_names)
+    tables, texture_shaders = dict(plan.tables), set(plan.texture_shaders)
+    counters = {'disassemble': 0, 'assemble': 0, 'validate': 0, 'shader_cache_hits': 0,
+                'analyzed_shaders': 0, 'migration_calls': 0}
+    durations = {'planning': time.perf_counter()-started, 'analysis': 0.0, 'declarations': 0.0,
+                 'migration': 0.0, 'disassemble': 0.0, 'assemble': 0.0, 'validate': 0.0}
+
+    def invoke(compiler, method, value):
+        tick = time.perf_counter()
+        try:
+            counters[method] += 1
+            return getattr(compiler, method)(value)
+        finally:
+            durations[method] += time.perf_counter()-tick
+
+    # 声明可逐项编辑文本，但旧读取只按源/最终布局迁移一次，不编译中间状态。
+    def declarations(ir, has_cb, has_texture):
+        tick = time.perf_counter()
+        size = old.parameter_bytes
+        for item in parameters if has_cb else ():
+            target = (item['byte_offset']+item['byte_size']+15)&~15
+            ir, _ = patch_declarations(ir, size, target, parameter=item)
+            size = target
+        allocated = []
+        for name in textures if has_texture else ():
+            ir, register = patch_declarations(ir, size, size, texture=name)
+            if not 0 <= register <= 255:
+                raise EditError('新增纹理寄存器超出已验证的8位PS绑定范围。')
+            allocated.append(register)
+        durations['declarations'] += time.perf_counter()-tick
+        return ir, tuple(allocated)
+
     candidate = copy.deepcopy(document)
     reports, registers, reflections = [], {}, {}
+    # 只在同次隔离 worker 内复用，键包含源载荷、阶段、布局/绑定计划及 DXC 身份。
+    # 最多保留 64 项/64MiB 载荷，避免把大量 IR 或历史文档留成全局缓存。
+    cache, cache_bytes = OrderedDict(), 0
     compiler = DxilAssembly(dll)
     try:
         for shader in info['shaders']:
             index = shader['index']
             original = document.shader_bytes(index)
-            ir = compiler.disassemble(original)
+            has_texture = index in texture_shaders
+            cache_key = (hashlib.sha256(original).digest(), shader['stage'], plan_digest, has_texture, 'assemble-stat-v1')
+            if cache_key in cache:
+                payload, after, allocated, relocated, strides = cache[cache_key]
+                cache.move_to_end(cache_key)
+                counters['shader_cache_hits'] += 1
+                reflections[index] = hashlib.sha256(payload if payload is not None else original).digest(), after
+                if payload is not None:
+                    candidate.replace_shader(index, payload, allow_interface_change=True,
+                                             note={'material_extension': True, 'dxc_validated': True})
+                    registers[index] = allocated
+                    reports.append({'index': index, 'relocated_reads': relocated, 'instance_strides': strides})
+                continue
+            ir = invoke(compiler, 'disassemble', original)
+            tick = time.perf_counter()
             before = reflection(ir)
             reflections[index] = hashlib.sha256(original).digest(), before
-            has_cb = parameter and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
-            has_texture = index in texture_shaders
-            # 未修改声明的Shader保持原文本；同一源只解析一次供计划和编译后对照使用。
-            edited, register = (patch_declarations(ir, old.parameter_bytes, new_size,
-                                                  parameter if has_cb else None, texture if has_texture else None)
-                                if has_cb or has_texture else (ir, None))
+            has_cb = bool(parameters) and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
             reads = material_reads(ir)
+            counters['analyzed_shaders'] += 1
+            durations['analysis'] += time.perf_counter()-tick
+            # 未修改声明的Shader保持原文本；同一源只解析一次供计划和编译后对照使用。
+            edited, allocated = (declarations(ir, has_cb, has_texture)
+                                if has_cb or has_texture else (ir, None))
+            tick = time.perf_counter()
             edited, relocation = relocate_material_reads(edited, old, new, reads=reads)
+            counters['migration_calls'] += 1
+            durations['migration'] += time.perf_counter()-tick
             if not has_cb and not has_texture and not relocation['relocated_extracts'] and not (
                     relocation['instance_stride_ssa'] and old.parameter_bytes != new_size):
                 continue
-            reflected_ir = compiler.disassemble(reflection_container(original))
-            reflected_ir, reflected_register = patch_declarations(reflected_ir, old.parameter_bytes, new_size,
-                                                                  parameter if has_cb else None, texture if has_texture else None)
-            if reflected_register != register:
+            reflected_ir = invoke(compiler, 'disassemble', reflection_container(original))
+            reflected_ir, reflected_allocated = declarations(reflected_ir, has_cb, has_texture)
+            if reflected_allocated != (allocated or ()):
                 raise EditError(f'Shader #{index} 的可执行/反射寄存器不一致。')
-            assembled, _ = compiler.assemble(edited)
-            reflected, _ = compiler.assemble(reflected_ir)
-            payload, _ = compiler.validate(replace_chunks(assembled, {'STAT': chunks(reflected)['STAT']}))
-            actual = compiler.disassemble(payload)
+            assembled, _ = invoke(compiler, 'assemble', edited)
+            reflected, _ = invoke(compiler, 'assemble', reflected_ir)
+            payload, _ = invoke(compiler, 'validate', replace_chunks(assembled, {'STAT': chunks(reflected)['STAT']}))
+            actual = invoke(compiler, 'disassemble', payload)
             after = reflection(actual)
             reflections[index] = hashlib.sha256(payload).digest(), after
             if bodies(actual) != bodies(edited) or interface_chunks(original) != interface_chunks(payload):
@@ -346,28 +428,39 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                 raise EditError('结构化缓冲反射发生意外变化。')
             added_bindings = [row for row in after['resource_binding_rows'] if row not in before['resource_binding_rows']]
             if (any(row not in after['resource_binding_rows'] for row in before['resource_binding_rows'])
-                    or len(added_bindings) != int(has_texture)):
+                    or len(added_bindings) != (len(textures) if has_texture else 0)):
                 raise EditError('原资源绑定反射发生意外变化。')
-            if has_texture and (added_bindings[0].split()[0] != texture or added_bindings[0].split()[-2] != f't{register}'):
+            if has_texture and [(r.split()[0], r.split()[-2]) for r in added_bindings] != list(zip(textures, (f't{r}' for r in allocated))):
                 raise EditError('新增纹理反射与绑定寄存器不一致。')
             for cb in before['cbuffers']:
                 updated = next((b for b in after['cbuffers'] if b['name'] == cb['name']), None)
                 if has_cb and cb['name'] == 'UserMaterial':
-                    if (updated is None or updated['size'] != new_size or updated['variables'][:-1] != cb['variables']
-                            or updated['variables'][-1]['name'] != 'VAR_'+name
-                            or updated['variables'][-1]['offset'] != parameter['byte_offset']
-                            or Document._reflection_member_size(updated['variables'][-1]['type']) != parameter['byte_size']):
+                    added = updated['variables'][len(cb['variables']):] if updated else []
+                    if (updated is None or updated['size'] != new_size
+                            or updated['variables'][:len(cb['variables'])] != cb['variables']
+                            or len(added) != len(parameters)
+                            or any(v['name'] != 'VAR_'+p['name'] or v['offset'] != p['byte_offset']
+                                   or Document._reflection_member_size(v['type']) != p['byte_size']
+                                   for v, p in zip(added, parameters))):
                         raise EditError('新增参数反射布局不符合预期。')
                 elif updated != cb:
                     raise EditError('原常量缓冲反射发生意外变化。')
             candidate.replace_shader(index, payload, allow_interface_change=True,
                                      note={'material_extension': True, 'dxc_validated': True})
-            registers[index] = register
+            registers[index] = allocated or ()
             reports.append({'index': index, 'relocated_reads': len(relocation['relocated_extracts']),
                             'instance_strides': len(relocation['instance_stride_ssa'])})
+            cache[cache_key] = (payload, after, allocated or (), len(relocation['relocated_extracts']),
+                                len(relocation['instance_stride_ssa']))
+            cache_bytes += len(payload)
+            while len(cache) > 64 or cache_bytes > 64*1024*1024:
+                _, row = cache.popitem(last=False)
+                cache_bytes -= len(row[0])
     finally:
         compiler.close()
-    operation = dict(kind='extend_material_interface', parameter=parameter, texture=texture, new_size=new_size,
+    tick = time.perf_counter()
+    operation = dict(kind='extend_material_interface', parameter=parameter, texture=texture,
+                     parameters=parameters, textures_added=textures, new_size=new_size,
                      textures=list(new.texture_names), gpbf=list(new.gpbf_names), tables=[])
     for offsets, records in tables.items():
         by_record = {}
@@ -400,7 +493,11 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     validation = candidate.validate_metadata_interfaces(dll, _in_worker=True, _reflections=reflections)
     if not validation['valid']:
         raise EditError(f'新增接口验证失败：{validation["issues"][0]}')
+    durations['build_metadata_validation'] = time.perf_counter()-tick
+    if dll_identity(dll) != plan.dxc_sha256:
+        raise EditError('DXC 身份在执行期间改变，拒绝提交。')
     document.replacements, document.replacement_notes = candidate.replacements, candidate.replacement_notes
     document.metadata_edits = candidate.metadata_edits
     return {'changed_shaders': len(reports), 'shader_reports': reports, 'srv_records': len(affected),
-            'parameter_bytes': new_size, 'validation': validation}
+            'parameter_bytes': new_size, 'validation': validation, 'plan': plan.report(),
+            'statistics': counters, 'seconds': {**durations, 'total': time.perf_counter()-started}}

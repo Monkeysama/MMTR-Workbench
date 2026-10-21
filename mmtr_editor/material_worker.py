@@ -19,7 +19,8 @@ def execute(request):
     from .material_extension import extend_material_interface
     report = extend_material_interface(document, request['material'], request['dll'],
                                         parameter=request.get('parameter'), texture=request.get('texture'),
-                                        record_index=request.get('record_index'))
+                                        record_index=request.get('record_index'), actions=request.get('actions'),
+                                        plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'))
     return {'document': document_state(document), 'report': report,
             'sha256': hashlib.sha256(document.build()[0]).hexdigest()}
 
