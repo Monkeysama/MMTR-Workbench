@@ -20,8 +20,11 @@ def execute(request):
         from .material_extension import current_layout
         from .material_usage import material_input_usage
         layout = current_layout(document, request['material'])
-        return material_input_usage(document, request['material'], layout,
-                                    DxilAssembly(request['dll']).disassemble)
+        compiler = DxilAssembly(request['dll'])
+        try:
+            return material_input_usage(document, request['material'], layout, compiler.disassemble)
+        finally:
+            compiler.close()
     if request['op'] != 'extend':
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface

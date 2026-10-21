@@ -316,6 +316,44 @@ float4 main(float4 p:SV_Position):SV_Target{return VAR_Value+A+B;}
         self.assertIn('i32 13, i32 32', annotations['Other'])
         self.assertIn('i32 13, i32 48', annotations['UserMaterial'])
 
+    # PR #3 放宽的寻址形状必须走真正的混合批次和 DXC，不能只检查合成文本替换。
+    def test_instance_shift_and_constant_address_survive_batch_compilation(self):
+        from mmtr_editor.dxc_process import disassemble_shader
+        for address in ('uint(position.x) * 16', '0'):
+            with self.subTest(address=address):
+                blob, _, before_ir = compile_hlsl(str(NATIVE_DXC), '''
+cbuffer UserMaterial : register(b0) { float4 VAR_Value; };
+Texture2D<float4> BaseMap : register(t3);
+ByteAddressBuffer UserMaterialInstances : register(t4);
+float4 main(float4 position: SV_Position) : SV_Target {
+    return BaseMap.Load(int3(position.xy, 0)) * VAR_Value
+         + asfloat(UserMaterialInstances.Load4('''+address+'''));
+}
+''', 'main', 'ps_6_6')
+                prefix = bytearray(self.source[:struct.unpack_from('<Q', self.source, 8)[0]])
+                for i in range(4):
+                    struct.pack_into('<Q', prefix, 16+i*0x110+0x30, len(prefix)+(i%2)*(len(blob)+8))
+                    struct.pack_into('<I', prefix, 16+i*0x110+0xCC, len(blob))
+                service = self.service()
+                service.doc = Document(bytes(prefix)+(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)))*2,
+                                       service.doc.source)
+                before = [r for r in material_reads(before_ir) if r['kind'] == 'instance']
+                self.assertTrue(before)
+                if address == '0':
+                    self.assertTrue(all(r['stride'] is None for r in before))
+                else:
+                    self.assertTrue(all(r['stride']['op'] == 'shl' for r in before))
+                result = self.apply(service, [{'action': 'parameter', 'name': 'P', 'byte_size': 4},
+                                              {'action': 'texture', 'name': 'Map'}])
+                self.assertTrue(result['interface_sync']['validation']['valid'])
+                after_ir = disassemble_shader(str(NATIVE_DXC), service.doc.shader_bytes(0))
+                after = [r for r in material_reads(after_ir) if r['kind'] == 'instance']
+                self.assertEqual([[e['offset'] for e in r['extracts']] for r in before],
+                                 [[e['offset'] for e in r['extracts']] for r in after])
+                for read in after:
+                    self.assertEqual(read['stride']['bytes'] if read['stride'] else None,
+                                     None if address == '0' else 32)
+
 
 if __name__ == '__main__':
     unittest.main()

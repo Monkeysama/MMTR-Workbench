@@ -84,7 +84,10 @@ class MaterialUsageTests(unittest.TestCase):
         self.assertEqual(next(r for r in report['textures'] if r['name'] == 'texB')['shader_count'], 2)
 
     def test_identical_payloads_are_analyzed_once(self):
-        self.assertEqual(usage([HEAP_IR, HEAP_IR])['shaders_analyzed'], 1)
+        report = usage([HEAP_IR, HEAP_IR])
+        self.assertEqual(report['shaders_analyzed'], 1)
+        self.assertEqual(report['shader_count'], 2)
+        self.assertEqual(next(r for r in report['parameters'] if r['name'] == 'p1')['shader_count'], 2)
 
     # 未知材质读取不能被当作未读取：参数与尾部都降为 unknown，并列出失败的 Shader。
     def test_unknown_record_read_downgrades_unused_to_unknown(self):
@@ -108,6 +111,41 @@ class MaterialUsageTests(unittest.TestCase):
         self.assertFalse(report['complete']['parameters'])
         self.assertIn('aggregate', report['failures'][0]['error'])
 
+    def test_unrecognized_static_load_and_handle_escape_are_unknown(self):
+        direct = STATIC_IR.replace('cbufferLoadLegacy.f32(i32 59', 'cbufferLoad.f32(i32 58')
+        escaped = STATIC_IR.replace('  ret void', '  call void @escape(%dx.types.Handle %cbh)\n  ret void')
+        for ir in (direct, escaped):
+            with self.subTest(ir=ir):
+                report = usage([ir])
+                self.assertFalse(report['complete']['parameters'])
+                self.assertEqual(states(report, 'parameters')['p0'], 'unknown')
+
+    def test_resource_provenance_and_empty_module_are_unknown(self):
+        opaque = STATIC_IR.replace('%dx.types.Handle %cbh, i32 1)', '%dx.types.Handle %opaque, i32 1)')
+        for ir in (opaque, '; no function body'):
+            report = usage([ir])
+            self.assertEqual(report['complete'], {'parameters': False, 'textures': False})
+
+    def test_ssa_names_are_local_to_each_function(self):
+        other = '''; Other cbuffer NA NA CB3 cb3 1
+define void @helper() {
+  %cbh = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 2, i32 3, i32 3, i1 false)
+  ret void
+}
+'''
+        report = usage([STATIC_IR+'\n'+other])
+        self.assertTrue(report['complete']['parameters'])
+        self.assertEqual(states(report, 'parameters')['p2'], 'used')
+
+    def test_descriptor_traversal_limit_and_external_call_are_unknown(self):
+        chain = '\n'.join(f'  %c{i} = add i32 '+('%texB' if i == 0 else f'%c{i-1}')+', 1' for i in range(70))
+        deep = HEAP_IR.replace('  %report = add i32 %texB, 7', chain)
+        escaped = HEAP_IR.replace('  %report = add i32 %texB, 7', '  call void @escape(i32 %texB)')
+        for ir in (deep, escaped):
+            report = usage([ir])
+            self.assertFalse(report['complete']['textures'])
+            self.assertEqual(states(report, 'textures')['texB'], 'unknown')
+
     # 参数实例流的读取计入参数；超出参数区的常量地址不解释为尾部字段。
     def test_instance_reads_count_as_parameters_only(self):
         def instance(address):
@@ -126,7 +164,7 @@ class MaterialUsageTests(unittest.TestCase):
     def test_mmtrs_material_marks_tail_incomplete(self):
         report = usage([HEAP_IR], {**MATERIAL, 'mmtrs': [[1, 0]]})
         self.assertFalse(report['complete']['textures'])
-        self.assertEqual(states(report, 'textures'), {'texA': 'used', 'texB': 'unknown'})
+        self.assertEqual(states(report, 'textures'), {'texA': 'unknown', 'texB': 'unknown'})
         self.assertTrue(report['notes'])
 
     def test_disassembly_failure_marks_everything_incomplete(self):

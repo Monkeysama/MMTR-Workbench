@@ -96,7 +96,7 @@ class WorkbenchSession:
         self.saved_mmtr = None
         self.text_cache = {}
         self.snapshot_cache = None
-        # 读取统计按 MMTR/MDF 当前字节和 DXC 路径缓存一份；任一变化都会重新统计。
+        # 读取统计按 MMTR/MDF/DXC 当前内容缓存一份，不能把原路径被替换的 DLL 当成同一个输入。
         self.usage_cache = None
 
     def require_doc(self):
@@ -320,12 +320,21 @@ def create_server(session=None):
         """统计所有 Shader 对所选 MDF 材质参数、纹理与 GPBF 的实际读取；只读，不修改文档。
         需要同时打开关联 MDF 并设置 DXC。state 为 used/descriptor/unused/unknown：descriptor 表示纹理描述符被读取
         但未构造为资源句柄；complete 为 false 时 unused/descriptor 降为 unknown。
+        unused 仅表示当前识别范围内未发现消费者，不证明全部间接访问，不能作为自动删除依据。
         """
         index = state.material_index(material_index, linked=True)
         doc = state.require_doc()
-        key = (hashlib.sha256(doc.build()[0]).hexdigest(), state.service.mdf.build()[1]['sha256'], index, state.dll)
+        if not state.dll:
+            raise EditError('请先设置DXC路径，再统计材质读取。')
+        from .material_plan import dll_identity
+        identity = dll_identity(state.dll)
+        key = (hashlib.sha256(doc.build()[0]).hexdigest(), state.service.mdf.build()[1]['sha256'], index,
+               str(Path(state.dll).resolve()), identity)
         if state.usage_cache is None or state.usage_cache[0] != key:
-            state.usage_cache = (key, state.call('mmtr_material_usage', material_index=index))
+            candidate = state.call('mmtr_material_usage', material_index=index)
+            if dll_identity(state.dll) != identity:
+                raise EditError('DXC 在读取统计期间改变，请重试。')
+            state.usage_cache = (key, candidate)
         report = state.usage_cache[1]
         rows = report[kind]
         if kind != 'failures' and state_filter != 'all':
@@ -336,6 +345,8 @@ def create_server(session=None):
         end = offset + limit
         return {'material_index': index, 'material': report['material'], 'kind': kind,
                 'shaders_analyzed': report['shaders_analyzed'], 'complete': report['complete'],
+                'coverage': report.get('coverage', {'scope': 'recognized_dxil_reads', 'deletion_supported': False}),
+                'shader_count': report.get('shader_count', report['shaders_analyzed']),
                 'counts': counts, 'failure_total': len(report['failures']), 'notes': report['notes'],
                 'total': len(rows), 'offset': offset, 'next_offset': end if end < len(rows) else None,
                 'items': rows[offset:end]}

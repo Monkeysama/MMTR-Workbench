@@ -138,10 +138,14 @@ PS声明可以混有其它space的有限或无界SRV数组：这些声明保留�
 
 - `used`：至少一个 Shader 读取。参数按读取字节落在参数偏移范围内判断；纹理要求句柄值流入 `createHandleFromHeap`，或按名称绑定的 SRV 被使用。
 - `descriptor`：读取了纹理描述符值，但未构造为资源句柄（例如只参与反馈或上报），槽位仍是有效的材质输入。
-- `unused`：全部 Shader 都不读取。只有 `complete` 对应类别为 true 时才给出。
-- `unknown`：存在无法证明身份的读取（与地址迁移的拒绝条件相同）、静态 `UserMaterial` 动态行索引或反汇编失败；`failures` 列出对应 Shader 与原因。
+- `unused`：在当前识别器覆盖的 DXIL 读取形式中未发现消费者，且 `complete` 对应类别为 true；这不是完整的未使用证明。
+- `unknown`：存在无法证明身份的读取、静态 `UserMaterial` 未支持的访问或句柄逃逸、资源句柄合流、追踪超限或反汇编失败；`failures` 列出对应 Shader 与原因。
 
-读取来源与地址迁移一致：heap 材质 CB、BindlessBuffer、UserMaterialInstances，另加静态绑定的 `UserMaterial` 常量缓冲与按名称绑定的纹理。无消费者的 `extractvalue` 不计入。材质含 MMTRS（shader LOD 重定向）时，尾部字段位置未按重定向解析，纹理与 GPBF 标为不完整。同一 MMTR/MDF 字节、材质与 DXC 路径复用一份结果；用于判断可复用的参数行与纹理槽，或确认改写后的 Shader 确实读取新增参数。统计不证明运行时实际经过的分支。
+读取来源与地址迁移一致：heap 材质 CB、BindlessBuffer、UserMaterialInstances，另加静态绑定的 `UserMaterial` 常量缓冲与按名称绑定的纹理。无消费者的 `extractvalue` 不计入。每个函数独立解析 SSA；相同载荷只分析一次，但 `shader_count` 统计实际 Shader 条目。材质含 MMTRS（shader LOD 重定向）时，未按重定向证明的尾部偏移不归到具体字段，按名称证明的 SRV 仍可报告。缓存绑定 MMTR/MDF 字节、材质及 DXC 路径和内容，DLL 原路径被替换也会失效。
+
+此工具对应优化计划 P5 的前置只读报告，提前提供给现有 MCP；P3 后台任务与 P4 独立变体仍按原顺序推进。返回的 `coverage.scope=recognized_dxil_reads`、`coverage.deletion_supported=false` 明确限定范围。报告不等于完整消费者/采样分析，不证明实际运行分支、所有间接访问或安全删除；不得根据 `unused` 自动删接口。真实删除仍需 P5 的独立证明与验收。
+
+2026-10-21 的 PR #3 整合验证：核心 330 项中 242 通过、88 项可选语料跳过，MCP 19 项通过，前端 17 项通过/1 项缺 fixture 跳过，TypeScript/Vite 构建通过。自有 HLSL 通过隔离 DXC 验证 shl 步长和常量地址在参数/纹理混合批次后的实际读取。固定 P0 Stocking 输入的真实源码 stdio 查询首次约 15.40 秒，后续分页约 0.04 秒；报告识别 164 个参数、21 个纹理、4 个 GPBF 有读取，11 个参数为 unknown，整体覆盖未完成，不能推断这些参数未使用。会话 revision、文档状态与输入文件字节均保持不变。证据仅限源码/CPU/DXC；未验收冻结包、GPU 或游戏效果。本地复现记录位于忽略的 `output/pr3-*`，不是线上附件。
 
 删除 MDF 字段不代表删除 MMTR Shader 接口；Sampler/UAV 和真正 MMTR 接口删除不提供自动迁移。手动 rename、expert 替换等仍受既有核心边界限制，不等于可运行布局已成立。`validate` 证明本次静态接口契约，不能替代 GPU 或游戏画面验收。
 

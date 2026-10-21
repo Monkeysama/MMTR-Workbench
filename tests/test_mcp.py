@@ -59,6 +59,9 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
                   'parameters': [{'name': 'A', 'state': 'used'}, {'name': 'B', 'state': 'unused'}],
                   'textures': [{'name': 'T', 'state': 'descriptor'}], 'gpbf': [], 'failures': [], 'notes': []}
         doc = SimpleNamespace(build=lambda: (b'mmtr', {}))
+        dll = self.root/'identity.dll'
+        dll.write_bytes(b'not loaded; identity only')
+        self.state.dll = str(dll)
         calls = []
         with patch.object(self.state, 'material_index', return_value=0), \
                 patch.object(self.state, 'require_doc', return_value=doc), \
@@ -68,7 +71,27 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['counts']['textures']['descriptor'], 1)
             result = await self.call('usage', kind='textures', limit=1)
             self.assertEqual((result['total'], result['next_offset']), (1, None))
-        self.assertEqual(calls, ['mmtr_material_usage'])
+            self.assertFalse(result['coverage']['deletion_supported'])
+            dll.write_bytes(b'replaced at same path')
+            await self.call('usage')
+        self.assertEqual(calls, ['mmtr_material_usage', 'mmtr_material_usage'])
+
+    async def test_usage_rejects_dxc_changing_during_worker(self):
+        dll = self.root/'changing.dll'
+        dll.write_bytes(b'first')
+        self.state.dll = str(dll)
+        doc = SimpleNamespace(build=lambda: (b'mmtr', {}))
+
+        def changed(*args, **kwargs):
+            dll.write_bytes(b'second')
+            return {}
+
+        with patch.object(self.state, 'material_index', return_value=0), \
+                patch.object(self.state, 'require_doc', return_value=doc), \
+                patch.object(self.state, 'call', side_effect=changed):
+            with self.assertRaisesRegex(ToolError, 'DXC .*改变'):
+                await self.call('usage')
+        self.assertIsNone(self.state.usage_cache)
 
     async def test_unicode_open_pagination_and_errors_preserve_session(self):
         result = await self.call('list', kind='materials', limit=1)

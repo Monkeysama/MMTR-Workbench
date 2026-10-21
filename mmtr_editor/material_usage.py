@@ -27,26 +27,33 @@ def _reaches_heap_handle(uses, ssa, limit=64):
         for row in uses.get(value, ()):
             if '@dx.op.createHandleFromHeap' in row['text']:
                 return True
+            if re.search(r'\bcall\b', row['text']) and '@dx.op.' not in row['text']:
+                return None
             if row['value']:
                 pending.append(row['value'])
-    return False
+    return None if pending else False
 
 
 # 单个 Shader 的读取：record 为材质记录字节偏移（参数区与尾部字段），cbuffer 为静态 UserMaterial 偏移；
 # record_handles 为其值流入 createHandleFromHeap 的记录偏移。
-def shader_input_reads(ir, cbuffer_name='UserMaterial'):
+def _function_input_reads(ir, cbuffer_name):
     definitions, uses, _ = parse(ir)
     result = {'record': set(), 'record_handles': set(), 'instance': set(), 'cbuffer': set(), 'textures': set(),
               'errors': []}
+    recognized_loads = set()
     try:
         for read in material_reads(ir):
+            recognized_loads.add(read['ssa'])
             for extract in read['extracts']:
                 # 无消费者的 extractvalue 不代表实际取值。
                 if uses.get(extract['ssa']):
                     # 参数实例流只含参数区；其偏移不能解释为尾部纹理/GPBF字段。
                     result['instance' if read['kind'] == 'instance' else 'record'].add(extract['offset'])
-                    if _reaches_heap_handle(uses, extract['ssa']):
+                    reaches = _reaches_heap_handle(uses, extract['ssa'])
+                    if reaches:
                         result['record_handles'].add(extract['offset'])
+                    elif reaches is None:
+                        result['errors'].append(('record', '描述符使用链超出分析范围或进入未知函数。'))
     except ValueError as exc:
         result['errors'].append(('record', str(exc)))
     origins = handle_sources(ir, definitions)
@@ -75,6 +82,39 @@ def shader_input_reads(ir, cbuffer_name='UserMaterial'):
                 continue
             if uses.get(user['value']):
                 result['cbuffer'].add(int(load[3]) * 16 + int(extract[1]) * lane_bytes)
+    # 未识别的读取形式或句柄逃逸必须影响覆盖度，不能因正则未匹配就解释为没有读取。
+    for handle in static_cb:
+        for user in uses.get(handle, ()):
+            if '@dx.op.annotateHandle(' in user['text']:
+                continue
+            if not _STATIC_CB.fullmatch(user['text']):
+                result['errors'].append(('cbuffer', f'{cbuffer_name} 句柄有未支持的消费者：{user["text"]}'))
+    for value, row in definitions.items():
+        if re.search(r'@dx.op\.(?:cbufferLoad|rawBufferLoad|bufferLoad)', row['text']):
+            match = re.search(r'%dx.types.Handle (%[\w.]+)', row['text'])
+            origin = origins.get(match[1], {}) if match else {}
+            if not origin or (origin.get('kind') == 'heap-descriptor' and value not in recognized_loads):
+                result['errors'].append(('all', f'缓冲读取来源或寻址未被覆盖：{row["text"]}'))
+        if ('%dx.types.Handle' in row['text'] and row['text'].startswith(('phi ', 'select '))):
+            result['errors'].append(('all', '存在未分析的资源句柄合流。'))
+    return result
+
+
+# SSA 名称只在函数内有意义；反射绑定为模块共享，函数正文逐个独立分析后合并。
+def shader_input_reads(ir, cbuffer_name='UserMaterial'):
+    bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
+    functions = re.findall(r'^define .*?^}', ir, flags=re.M | re.S)
+    result = {'record': set(), 'record_handles': set(), 'instance': set(), 'cbuffer': set(), 'textures': set(),
+              'errors': []}
+    if not functions:
+        result['errors'].append(('all', '没有可独立分析的 DXIL 函数。'))
+    for body in functions:
+        reads = _function_input_reads(bindings+'\n'+body, cbuffer_name)
+        for key, values in reads.items():
+            if key == 'errors':
+                result[key].extend(values)
+            else:
+                result[key].update(values)
     return result
 
 
@@ -90,16 +130,16 @@ def material_input_usage(document, material, layout, disassemble):
     for shader in info['shaders']:
         payload = document.shader_bytes(shader['index'])
         key = hashlib.sha256(payload).digest()
-        if key in seen:
-            continue
-        seen[key] = shader['index']
-        try:
-            reads = shader_input_reads(disassemble(payload))
-        except Exception as exc:  # 反汇编失败的 Shader 使两类结果都不完整。
-            failures.append({'shader': shader['index'], 'scope': 'all', 'error': str(exc)})
-            continue
+        if key not in seen:
+            try:
+                seen[key] = shader_input_reads(disassemble(payload))
+            except Exception as exc:  # 反汇编失败的 Shader 使两类结果都不完整。
+                seen[key] = {'errors': [('all', str(exc))]}
+        reads = seen[key]
         for scope, error in reads['errors']:
             failures.append({'shader': shader['index'], 'scope': scope, 'error': error})
+        if 'record' not in reads:
+            continue
         for offset in reads['instance']:
             if offset >= layout.parameter_bytes:
                 failures.append({'shader': shader['index'], 'scope': 'record',
@@ -119,7 +159,8 @@ def material_input_usage(document, material, layout, disassemble):
     parameters_complete = not failures
     tail_complete = not any(f['scope'] in ('record', 'all') for f in failures)
     notes = []
-    if any(material.get('mmtrs') or ()):
+    redirected = any(material.get('mmtrs') or ())
+    if redirected:
         # MMTRS（shader LOD 重定向）改变尾部字段顺序与起点，当前布局模型不覆盖。
         tail_complete = False
         notes.append('材质含 MMTRS（shader LOD 重定向），尾部字段位置未按重定向解析，纹理/GPBF 结果不完整。')
@@ -146,9 +187,9 @@ def material_input_usage(document, material, layout, disassemble):
     def tail_rows(names, textures):
         rows = []
         for name in names:
-            readers = set(record_reads.get(fields[name], ()))
+            readers = set(record_reads.get(fields[name], ())) if not redirected else set()
             if textures:
-                handles = set(record_handles.get(fields[name], ())) | named_textures.get(name, set())
+                handles = (set(record_handles.get(fields[name], ())) if not redirected else set()) | named_textures.get(name, set())
                 state = 'used' if handles else ('descriptor' if readers else _state((), tail_complete))
                 if state == 'descriptor' and not tail_complete:
                     state = 'unknown'
@@ -163,6 +204,8 @@ def material_input_usage(document, material, layout, disassemble):
         'material': material.get('name'),
         'parameter_bytes': layout.parameter_bytes,
         'shaders_analyzed': len(seen),
+        'shader_count': len(info['shaders']),
+        'coverage': {'scope': 'recognized_dxil_reads', 'deletion_supported': False},
         'complete': {'parameters': parameters_complete, 'textures': tail_complete},
         'parameters': parameters,
         'textures': tail_rows(layout.texture_names, True),
