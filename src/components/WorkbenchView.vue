@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
+import { computed, shallowRef, watch } from "vue";
 // 品牌角标直接使用发布版本，避免与构建包的版本号脱节。
 import { version as appVersion } from "../../package.json";
 import {
@@ -29,7 +29,7 @@ import {
   FileKey,
 } from "lucide-vue-next";
 import { useWorkbench } from "../composables/useWorkbench";
-import { basename, bytes, type Tab } from "../types";
+import { basename, bytes, type Tab, type DocumentTab, type DocumentState, type DocumentController } from "../types";
 import OverviewPanel from "./OverviewPanel.vue";
 import PassPanel from "./PassPanel.vue";
 import ShaderPanel from "./ShaderPanel.vue";
@@ -39,9 +39,17 @@ import SourcePanel from "./SourcePanel.vue";
 import MdfPanel from "./MdfPanel.vue";
 import FileDialog from "./FileDialog.vue";
 import ToolSettings from "./ToolSettings.vue";
-import FileDropOverlay from "./FileDropOverlay.vue";
 import MaterialBatchDialog from "./material/MaterialBatchDialog.vue";
-const wb = useWorkbench();
+import DocumentTabs from "./DocumentTabs.vue";
+const props = defineProps<{ documentId: string; tabs: DocumentTab[]; active: boolean; workspaceBusy: boolean }>();
+const emit = defineEmits<{
+  ready: [controller: DocumentController]; state: [state: DocumentState];
+  select: [id: string]; close: [id: string]; create: [];
+  "open-mmtr": [paths: string[]]; "open-mdf": [path: string];
+}>();
+const wb = useWorkbench({ documentId: props.documentId,
+  openMmtr: paths => emit("open-mmtr", paths), openMdf: path => emit("open-mdf", path) });
+emit("ready", { ready: wb.ready, loadMmtr: wb.loadMmtr, loadMdf: wb.loadMdf, confirmClose: wb.confirmClose });
 const {
   doc,
   mdfDoc,
@@ -62,7 +70,11 @@ const {
   integrityOk,
 } = wb;
 const settings = shallowRef(false);
-const { active: dropActive, title: dropTitle, description: dropDescription, problem: dropProblem } = wb.fileDrop;
+// 父容器只读取生命周期摘要；编辑状态与异步回调始终属于当前固定文档。
+watch((): DocumentState => ({ source: doc.value?.source ?? null, mdfSource: mdfDoc.value?.source ?? null,
+  dirty: wb.dirty.value, busy: busy.value || wb.mdfSaving.value,
+  modal: !!dialog.value || settings.value || wb.materialBatch.visible.value || wb.materialRemoval.visible.value,
+}), state => emit("state", state), { immediate: true, flush: "sync" });
 const nav: { id: Tab; label: string; icon: typeof Layers3 }[] = [
   { id: "overview", label: "文件概览", icon: LayoutDashboard },
   { id: "passes", label: "渲染通道", icon: Workflow },
@@ -88,7 +100,6 @@ function navigate(id: string) {
 <template>
   <ElConfigProvider :locale="zhCn">
     <div class="workbench" :aria-busy="busy">
-      <FileDropOverlay v-if="dropActive" :title="dropTitle" :description="dropDescription" :invalid="!!dropProblem" />
       <aside class="sidebar">
         <div class="brand">
           <Layers3 :size="26" />
@@ -142,16 +153,19 @@ function navigate(id: string) {
       </aside>
       <div class="main-shell">
         <header class="topbar">
-          <div class="document-tab">
-            <FileJson :size="18" /><span :title="doc?.source">{{
-              doc ? basename(doc.source) : "MMTR Workbench"
-            }}</span
-            ><span v-if="unsaved" class="change-dot" />
-          </div>
+          <DocumentTabs
+            :tabs="props.tabs"
+            :active-id="props.documentId"
+            :active="props.active"
+            :disabled="props.workspaceBusy || !!dialog || settings || wb.materialBatch.visible.value || wb.materialRemoval.visible.value"
+            @select="emit('select', $event)"
+            @close="emit('close', $event)"
+            @create="emit('create')"
+          />
           <div class="top-actions">
-            <ElButton :disabled="busy" @click="wb.openFile()"
+            <ElButton :disabled="props.workspaceBusy" @click="wb.openFile()"
               ><FolderOpen :size="17" />打开 MMTR</ElButton
-            ><ElButton :disabled="busy" @click="wb.openMdf()"
+            ><ElButton :disabled="busy || props.workspaceBusy" @click="wb.openMdf()"
               ><FileKey :size="17" />打开 MDF</ElButton
             ><ElButton
               type="primary"
@@ -329,7 +343,11 @@ function navigate(id: string) {
               v-else
               class="status-dot"
             />{{ status }}</span
-          ><span>{{
+          ><ElButton v-if="!wb.materialBatch.visible.value && (wb.materialBatch.job.value || wb.materialBatch.working.value)"
+            text size="small" @click="wb.materialBatch.visible.value = true">查看新增任务</ElButton>
+          <ElButton v-if="!wb.materialRemoval.visible.value && (wb.materialRemoval.job.value || wb.materialRemoval.working.value)"
+            text size="small" @click="wb.materialRemoval.visible.value = true">查看删除任务</ElButton>
+          <span>{{
             doc
               ? `${doc.shader_count} shaders · ${bytes(doc.size)}`
               : "准备就绪"
@@ -337,15 +355,15 @@ function navigate(id: string) {
         </footer>
       </div>
       <ToolSettings
-        v-if="settings"
+        v-if="props.active && settings"
         :dll="dll"
         :expert="expert"
         @close="settings = false"
         @dll="wb.saveDll"
         @expert="expert = $event"
       />
-      <FileDialog v-if="dialog" :dialog="dialog" @done="wb.finishDialog" />
-      <MaterialBatchDialog v-if="wb.materialBatch.visible.value"
+      <FileDialog v-if="props.active && dialog" :dialog="dialog" @done="wb.finishDialog" />
+      <MaterialBatchDialog v-if="props.active && wb.materialBatch.visible.value"
         v-model:rows="wb.materialBatch.rows.value" v-model:record="wb.materialBatch.record.value"
         v-model:mode="wb.materialBatch.mode.value" v-model:variant="wb.materialBatch.variant.value"
         :passes="doc?.passes ?? []" :plan="wb.materialBatch.plan.value" :job="wb.materialBatch.job.value"
@@ -355,15 +373,17 @@ function navigate(id: string) {
         :notice="wb.materialBatch.notice.value" :candidate="wb.materialBatch.candidate.value"
         @choose="wb.materialBatch.chooseTarget" @export="wb.materialBatch.exportVariant" @discard="wb.materialBatch.discardVariant"
         @save-project="wb.materialBatch.saveProject" @read-project="wb.materialBatch.readProject"
+        @minimize="wb.materialBatch.visible.value = false"
         @add="wb.materialBatch.add" @close="wb.materialBatch.close" @preview="wb.materialBatch.preview"
         @start="wb.materialBatch.start" @cancel="wb.materialBatch.cancel" @retry="wb.materialBatch.submitPending" />
-      <MaterialRemovalDialog v-if="wb.materialRemoval.visible.value"
+      <MaterialRemovalDialog v-if="props.active && wb.materialRemoval.visible.value"
         v-model="wb.materialRemoval.visible.value"
         :action="wb.materialRemoval.action.value" :job="wb.materialRemoval.job.value"
         :eligible="!!wb.materialRemoval.report.value?.eligible"
         :failures="wb.materialRemoval.report.value?.failures ?? []"
         :error="wb.materialRemoval.error.value" :loading="wb.materialRemoval.loading.value"
         :working="wb.materialRemoval.working.value" :pending="!!wb.materialRemoval.pending.value"
+        @minimize="wb.materialRemoval.visible.value = false"
         @preview="wb.materialRemoval.preview" @remove="wb.materialRemoval.remove" @cancel="wb.materialRemoval.cancel" @retry="wb.materialRemoval.retry" />
     </div>
   </ElConfigProvider>

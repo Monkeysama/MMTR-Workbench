@@ -15,7 +15,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   "update:rows": [rows: MaterialDraft[]]; "update:record": [record: number | undefined];
-  add: [action: "parameter" | "texture"]; close: []; preview: []; start: []; cancel: []; retry: [];
+  add: [action: "parameter" | "texture"]; close: []; minimize: []; preview: []; start: []; cancel: []; retry: [];
   "update:mode": [value: "shared_master" | "independent_variant"]; "update:variant": [value: VariantOptions];
   choose: [key: "mmtr_path" | "mdf_path"]; export: []; discard: []; "save-project": []; "read-project": [];
 }>();
@@ -59,6 +59,7 @@ function remove(id: number) { emit("update:rows", props.rows.filter(row => row.i
       <ElAlert v-if="error" type="error" :title="error" :closable="false" />
     </div>
     <template #footer>
+      <ElButton v-if="working" @click="emit('minimize')">收起任务</ElButton>
       <ElButton v-if="!candidate" :disabled="working" @click="emit('close')">关闭</ElButton>
       <ElButton v-if="candidate" :disabled="loading" @click="emit('discard')">丢弃候选</ElButton>
       <ElButton v-if="candidate" type="primary" :loading="loading" @click="emit('export')">导出独立变体</ElButton>

@@ -64,8 +64,11 @@ async function browse() {
     const result =
       props.dialog.kind === "save"
         ? await save({ defaultPath: value.value || undefined })
-        : await open({ multiple: false, directory: false });
+        : props.dialog.multiple
+          ? await open({ multiple: true, directory: false })
+          : await open({ multiple: false, directory: false });
     if (typeof result === "string") value.value = result;
+    else if (Array.isArray(result)) value.value = result.join("\n");
   } catch (e) {
     dialogError.value = String(e);
   }
@@ -104,6 +107,8 @@ async function browse() {
         <ElInput
           ref="field"
           v-model="value"
+          :type="dialog.multiple ? 'textarea' : 'text'"
+          :rows="dialog.multiple ? 4 : undefined"
           :placeholder="dialog.placeholder"
           :aria-label="dialog.kind === 'text' ? '编辑值' : '文件路径'"
         /><ElButton v-if="isDesktop() && dialog.kind !== 'text'" @click="browse"

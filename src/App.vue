@@ -1,4 +1,4 @@
 <script setup lang="ts">
-import WorkbenchView from "./components/WorkbenchView.vue";
+import WorkspaceView from "./components/WorkspaceView.vue";
 </script>
-<template><WorkbenchView /></template>
+<template><WorkspaceView /></template>

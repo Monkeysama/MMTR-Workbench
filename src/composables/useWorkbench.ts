@@ -1,10 +1,9 @@
-import { computed, onMounted, onUnmounted, reactive, shallowRef, watch } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { request, isDesktop } from "../api";
-import { droppedDocuments, useDocumentDrop } from "./useDocumentDrop";
+import { computed, reactive, shallowRef, watch } from "vue";
+import { request as coreRequest } from "../api";
 import { serialEdits } from "../utils/serialEdits";
 import { useMaterialBatch } from "./useMaterialBatch";
 import { useMaterialRemoval, type RemovalAction } from "./useMaterialRemoval";
+import type { MaterialJob } from "../materialBatch";
 import {
   basename,
   type CompileResult,
@@ -20,7 +19,15 @@ import {
   type Tab,
 } from "../types";
 
-export function useWorkbench() {
+/** 一个标签永久持有一份编辑状态；所有异步请求绑定不可变的文档身份。 */
+export function useWorkbench(options: {
+  documentId: string;
+  openMmtr: (paths: string[]) => void;
+  openMdf: (path: string) => void;
+}) {
+  const documentId = options.documentId;
+  const request = <T>(op: string, args: Record<string, unknown> = {}) =>
+    coreRequest<T>(op, { ...args, document_id: documentId });
   const interfaceValidation = shallowRef<InterfaceValidation | null>(null);
   const validatingInterfaces = shallowRef(false);
   const doc = shallowRef<DocumentInfo | null>(null);
@@ -37,23 +44,30 @@ export function useWorkbench() {
   const ir = shallowRef("");
   const expert = shallowRef(false);
   const dll = shallowRef(localStorage.getItem("mmtr-dxc") ?? "");
-  const source = reactive<SourceInput>({
+  const initialSource: SourceInput = {
     source:
       "// 自备 HLSL 源代码；DXIL IR 不是原始 HLSL。\n// 编译后需保持资源、常量布局和输入输出兼容。\n",
     entry: "main",
     profile: "ps_6_2",
-  });
+  };
+  const source = reactive<SourceInput>({ ...initialSource });
+  const sourceUnsaved = computed(() => JSON.stringify(source) !== JSON.stringify(initialSource));
   const compileResult = shallowRef<CompileResult | null>(null);
   const sourceTrace = shallowRef<ReconstructionTrace | null>(null);
   const compiledFingerprint = shallowRef("");
   const revision = shallowRef(0);
   const exportedRevision = shallowRef(0);
+  // 后端快照是保存状态的依据，覆盖批次、metadata 编辑及刷新恢复路径。
+  watch(doc, value => {
+    if (!value) return;
+    revision.value = value.revision ?? revision.value + 1;
+    if (value.exported_revision !== undefined) exportedRevision.value = value.exported_revision;
+  }, { flush: "sync" });
   const unsaved = computed(() => !!doc.value?.dirty && revision.value !== exportedRevision.value);
   const mdfUnsaved = computed(() => !!mdfDoc.value?.unsaved);
   const canAddMaterialInterfaces = computed(() => !!doc.value && mdfDoc.value?.selected?.mmtr_linked === true);
   const dialog = shallowRef<DialogState | null>(null);
   let resolveDialog: ((value: string | null) => void) | null = null;
-  let unlistenClose: (() => void) | undefined;
   const shader = computed(
     () =>
       doc.value?.shaders.find((s) => s.index === selectedIndex.value) ?? null,
@@ -75,6 +89,7 @@ export function useWorkbench() {
   // 批量任务复用核心事务，成功后只刷新已提交文档并推进一次未保存计数。
   const materialBatch = useMaterialBatch({
     dll,
+    documentId,
     choosePath: (title, kind, value) => path(title, kind, value),
     blocked: () => busy.value || !!dialog.value || !canAddMaterialInterfaces.value,
     drain: () => mdfEdits.drain(),
@@ -85,7 +100,6 @@ export function useWorkbench() {
       ]);
       doc.value = mmtr;
       mdfDoc.value = mdf;
-      revision.value += 1;
       ir.value = "";
       sourceTrace.value = null;
       status.value = "批次已完成 · MMTR 与全部已知关联材质已同步，请分别另存";
@@ -94,11 +108,12 @@ export function useWorkbench() {
   // 删除沿用后台任务服务，预检通过后才允许提交完整 MMTR/MDF 候选。
   const materialRemoval = useMaterialRemoval({
     dll: () => dll.value,
+    documentId,
     drain: () => mdfEdits.drain(),
     setBusy: value => { busy.value = value; },
     committed: async () => {
       const [mmtr, mdf] = await Promise.all([request<DocumentInfo>("snapshot"), request<MdfDocument | null>("mdf_snapshot")]);
-      doc.value = mmtr; mdfDoc.value = mdf; revision.value += 1; ir.value = "";
+      doc.value = mmtr; mdfDoc.value = mdf; ir.value = "";
       status.value = "删除已完成 · MMTR 与全部已知关联材质已同步，请分别另存";
     },
   });
@@ -161,18 +176,18 @@ export function useWorkbench() {
     }
   }
   async function openFile(given?: string) {
-    if (busy.value || !(await discard("mmtr"))) return;
-    const p =
-      given ?? (await path("打开 MMTR", "open", doc.value?.source ?? ""));
+    if (dialog.value) return;
+    const p = given ?? (await ask({ title: "打开 MMTR", kind: "open", value: "",
+      description: "可多选 MMTR 文件，也可每行输入一个完整路径。", multiple: true,
+      confirmLabel: "打开", placeholder: "每行一个 MMTR 文件路径" }));
     if (!p) return;
-    return loadMmtr(p);
+    options.openMmtr(p.split(/\r?\n/).map(value => value.trim()).filter(Boolean));
   }
   async function loadMmtr(p: string) {
     return run("解析 MMTR 并验证 hash…", async () => {
       doc.value = await request<DocumentInfo>("open", { path: p });
       mdfDoc.value = await request<MdfDocument | null>("mdf_snapshot");
-      revision.value = 0;
-      exportedRevision.value = 0;
+      exportedRevision.value = revision.value;
       selectedIndex.value = null;
       sourceTrace.value = null;
       ir.value = "";
@@ -182,12 +197,13 @@ export function useWorkbench() {
     });
   }
   async function openMdf(given?: string) {
-    if (busy.value || !(await discard("mdf"))) return;
+    if (dialog.value) return;
     const p = given ?? (await path("打开 MDF", "open", mdfDoc.value?.source ?? ""));
     if (!p) return;
-    return loadMdf(p);
+    options.openMdf(p);
   }
   async function loadMdf(p: string) {
+    if (!(await discard("mdf"))) return false;
     return run("解析 MDF 2.45…", async () => {
       mdfDoc.value = await request<MdfDocument>("mdf_open", { path: p, material_index: 0 });
       tab.value = "mdf";
@@ -195,19 +211,19 @@ export function useWorkbench() {
       return true;
     });
   }
-  async function openDroppedFiles(paths: string[]) {
-    if (busy.value || dialog.value) return;
-    const files = droppedDocuments(paths);
-    const scope = files.mmtr && files.mdf ? "all" : files.mmtr ? "mmtr" : "mdf";
-    if (!(await discard(scope))) return;
-    if (files.mmtr && !(await loadMmtr(files.mmtr))) return;
-    if (files.mdf) await loadMdf(files.mdf);
+  const pendingWork = computed(() => materialBatch.working.value || materialRemoval.working.value);
+  const dirty = computed(() => unsaved.value || mdfUnsaved.value || sourceUnsaved.value);
+  // 后台任务可在确认后取消；普通请求执行中不允许销毁视图，避免未确认提交。
+  async function confirmClose() {
+    if (dialog.value || (busy.value && !pendingWork.value)) return false;
+    await mdfEdits.drain();
+    if (!dirty.value && !pendingWork.value) return true;
+    return await ask({
+      title: "关闭此文档标签？",
+      description: "未导出的 MMTR/MDF 修改和 HLSL 草稿将被丢弃；后台任务将取消，未导出的变体候选将释放。",
+      value: "", kind: "confirm", confirmLabel: "放弃并关闭",
+    }) !== null;
   }
-  const fileDrop = useDocumentDrop({
-    blocked: () => busy.value || !!dialog.value,
-    open: openDroppedFiles,
-    error: message => { error.value = message; },
-  });
   async function selectMdfMaterial(index: number) {
     if (!mdfDoc.value || busy.value) return;
     await run("读取材质绑定…", async () => {
@@ -348,7 +364,6 @@ export function useWorkbench() {
     await run(label, async () => {
       doc.value = await request<DocumentInfo>(op, args);
       mdfDoc.value = await request<MdfDocument | null>("mdf_snapshot");
-      revision.value++;
       status.value = "修改已暂存 · 另存导出后写入文件";
     });
   }
@@ -559,7 +574,7 @@ export function useWorkbench() {
           size: number;
           sha256: string;
         }>("export", { path: p, dll: dll.value });
-      exportedRevision.value = revision.value;
+        exportedRevision.value = revision.value;
         status.value = report.unchanged
           ? "导出完成 · 与原文件逐字节相同"
           : `导出完成 · 结构复查通过 · ${p}`;
@@ -718,43 +733,38 @@ export function useWorkbench() {
     dll.value = value;
     localStorage.setItem("mmtr-dxc", value);
   }
-  function beforeUnload(e: BeforeUnloadEvent) {
-    if (unsaved.value || mdfUnsaved.value || busy.value || mdfSaving.value) {
-      e.preventDefault();
-      e.returnValue = "";
-    }
-  }
-  onMounted(async () => {
-    window.addEventListener("beforeunload", beforeUnload);
+  // 初始恢复也绑定本标签，根容器在首次打开/关闭前等待 ready。
+  const ready = (async () => {
     try {
       const ping = await request<{ dxc: string }>("ping");
       if (!dll.value) dll.value = ping.dxc;
-      const existing = await request<DocumentInfo | null>("snapshot");
-      mdfDoc.value = await request<MdfDocument | null>("mdf_snapshot");
-      if (existing) {
-        doc.value = existing;
-        revision.value = existing.dirty ? 1 : 0;
+      const state = await request<{ revision: number; exported_revision: number; jobs: MaterialJob[];
+        doc: DocumentInfo | null; mdf: MdfDocument | null }>("workspace_state");
+      mdfDoc.value = state.mdf;
+      if (state.doc) {
+        doc.value = state.doc;
         status.value = "已恢复内存中的文档";
       }
+      revision.value = state.revision;
+      exportedRevision.value = state.exported_revision;
+      for (const job of state.jobs) {
+        if (job.operation === "removal" || job.operation === "removal_preview") materialRemoval.restore(job);
+        else materialBatch.restore(job);
+      }
+      if (!state.doc && mdfDoc.value) tab.value = "mdf";
+      return true;
     } catch (e) {
       error.value = String(e);
+      return false;
     }
-    if (isDesktop()) {
-      unlistenClose = await getCurrentWindow().onCloseRequested(
-        async (event) => {
-          event.preventDefault();
-          if (!busy.value && (await discard()))
-            await getCurrentWindow().destroy();
-        },
-      );
-    }
-  });
-  onUnmounted(() => {
-    window.removeEventListener("beforeunload", beforeUnload);
-    unlistenClose?.();
-  });
+  })();
   return {
-    fileDrop,
+    ready,
+    dirty,
+    pendingWork,
+    confirmClose,
+    loadMmtr,
+    loadMdf,
     materialBatch,
     materialRemoval,
     doc,

@@ -568,17 +568,24 @@ class RpcSession:
                 paths.update(Path(service.mdf_migration[key]['source']).resolve() for key in ('source_mmtr', 'target_mmtr'))
         return tuple(paths)
 
-    def _check_open(self, context_id, path):
-        """同源与硬链接只允许一个可编辑上下文，防止多份 MDF 各自导出。"""
+    def _find_source(self, path, exclude=None):
+        """按规范路径和硬链接查找源文件所有者，供打开定位与写入保护共用。"""
         path = Path(path).resolve()
         for other_id, context in self.contexts.items():
-            if other_id == context_id:
+            if other_id == exclude:
                 continue
             for doc in (context.service.doc, context.service.mdf):
                 if doc and doc.source:
                     source = Path(doc.source).resolve()
                     if path == source or (path.exists() and source.exists() and path.samefile(source)):
-                        raise EditError(f'该源文件已在其他标签中打开（{other_id}），请切换到已有标签。')
+                        return other_id
+        return None
+
+    def _check_open(self, context_id, path):
+        """同源与硬链接只允许一个可编辑上下文，防止多份 MDF 各自导出。"""
+        owner = self._find_source(path, exclude=context_id)
+        if owner is not None:
+            raise EditError(f'该源文件已在其他标签中打开（{owner}），请切换到已有标签。')
 
     def handle(self, request):
         op = request['op']
@@ -595,6 +602,19 @@ class RpcSession:
                  'revision': context.revision}
                 for context in self.contexts.values()
             ]}
+        if op == 'workspace_find':
+            return {'document_id': self._find_source(request['path'])}
+        if op == 'workspace_state':
+            # 同锁返回文档、保存状态及待处理任务，避免后台提交夹在多个恢复请求之间。
+            from .material_jobs import TERMINAL
+            context = self._context(context_id)
+            with context.lock, context.jobs.lock:
+                return {'document_id': context_id, 'revision': context.revision,
+                        'exported_revision': context.exported_revision,
+                        'doc': context.service.handle({'op': 'snapshot'}),
+                        'mdf': context.service.handle({'op': 'mdf_snapshot'}),
+                        'jobs': [context.jobs._status(job) for job in context.jobs.jobs.values()
+                                 if job.state not in TERMINAL or job.variant_candidate is not None]}
         if op == 'workspace_close':
             context = self._context(context_id)
             if (context.unsaved() or context.pending()) and request.get('discard') is not True:
@@ -653,7 +673,7 @@ class RpcSession:
             if op in ('open', 'export'):
                 context.exported_revision = context.revision
             if isinstance(result, dict):
-                result = {**result, 'revision': context.revision}
+                result = {**result, 'revision': context.revision, 'exported_revision': context.exported_revision}
             return self._with_context(result, context_id)
 
     def close(self):

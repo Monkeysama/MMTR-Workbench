@@ -77,6 +77,16 @@ class RpcWorkspaceTests(unittest.TestCase):
             original.pop('revision')
         self.assertEqual(after, before)
 
+    def test_find_locates_mmtr_mdf_and_hardlinks_without_changing_selection(self):
+        self.open_pair('a', 'default')
+        self.open_pair('b', 'other')
+        link = self.root / 'linked.mdf2.45'
+        os.link(self.root / 'b.mdf2.45', link)
+        for path, owner in ((self.root / 'a.mmtr.240906211', 'default'), (link, 'other'),
+                            (self.root / 'missing.mmtr.240906211', None)):
+            self.assertEqual(self.call('workspace_find', path=str(path))['document_id'], owner)
+        self.assertEqual(self.call('mdf_snapshot', 'other')['selected']['index'], 0)
+
     def test_every_export_protects_other_tabs_sources_and_hardlinks(self):
         self.open_pair('a', 'default')
         self.open_pair('b', 'other')
@@ -112,8 +122,12 @@ class RpcWorkspaceTests(unittest.TestCase):
         self.open_pair('b', 'other')
         dll = self.root / 'identity.dll'
         dll.write_bytes(b'identity only, never loaded')
-        # 合成 MDF 的 master 与源文件名不匹配；只为本用例在内存修正关联。
-        self.session.service.doc.source = self.root / 'MaterialShader' / 'test.mmtr.240906211'
+        # 通过真实打开恢复与合成 MDF 匹配的源路径，保持文档缓存及身份一致。
+        source = self.root / 'MaterialShader' / 'test.mmtr.240906211'
+        source.parent.mkdir()
+        source.write_bytes(mmtr_fixture())
+        self.call('open', path=str(source))
+        self.call('mdf_open', path=str(self.root / 'a.mdf2.45'))
         entered, release = Event(), Event()
         self.addCleanup(release.set)
         actions = [dict(action='parameter', name='Extra', byte_size=4)]
@@ -129,6 +143,11 @@ class RpcWorkspaceTests(unittest.TestCase):
         with patch('mmtr_editor.material_jobs.apply_material_batch', side_effect=apply):
             job = self.call('material_job_submit', actions=actions, record_index=0, dll=str(dll), expected_plan=plan['digest'], request_key='same')
             self.assertTrue(entered.wait(2))
+            restored = self.call('workspace_state')
+            self.assertEqual([row['job_id'] for row in restored['jobs']], [job['job_id']])
+            self.assertEqual(restored['doc']['source'], str(self.session.service.doc.source))
+            self.assertEqual(restored['mdf']['selected']['properties'][0]['values'], [0.5])
+            self.assertEqual(self.call('workspace_state', 'other')['jobs'], [])
             with self.assertRaises(EditError):
                 self.call('material_job_status', 'other', job_id=job['job_id'])
             with self.assertRaisesRegex(EditError, '确认放弃'):
@@ -143,6 +162,8 @@ class RpcWorkspaceTests(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual(status['state'], 'succeeded', status)
+            self.assertEqual(self.call('workspace_state')['jobs'], [])
+            self.assertEqual(self.call('workspace_state')['mdf']['selected']['properties'][0]['values'], [0.75])
             self.assertEqual(self.call('mdf_snapshot')['selected']['properties'][0]['values'], [0.75])
             self.assertEqual(self.call('mdf_snapshot', 'other')['selected']['properties'][0]['values'], [0.25])
             self.assertEqual(self.session.contexts['other'].revision, other_revision)

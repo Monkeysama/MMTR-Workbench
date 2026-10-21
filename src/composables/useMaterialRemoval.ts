@@ -1,5 +1,5 @@
 import { computed, onUnmounted, shallowRef, watch } from "vue";
-import { request, CoreRequestError } from "../api";
+import { request as coreRequest, CoreRequestError } from "../api";
 import type { MaterialJob } from "../materialBatch";
 
 export type RemovalAction = { action: "parameter" | "texture"; name: string };
@@ -16,7 +16,10 @@ export function useMaterialRemoval(options: {
   committed: () => Promise<void>;
   drain: () => Promise<unknown>;
   dll: () => string;
+  documentId: string;
 }) {
+  const request = <T>(op: string, args: Record<string, unknown> = {}) =>
+    coreRequest<T>(op, { ...args, document_id: options.documentId });
   const visible = shallowRef(false);
   const action = shallowRef<RemovalAction | null>(null);
   const job = shallowRef<MaterialJob | null>(null);
@@ -75,6 +78,11 @@ export function useMaterialRemoval(options: {
     try { await accept(await request<MaterialJob>("material_job_status", { job_id: job.value.job_id }), generation); }
     catch (exc) { if (!disposed && generation === epoch) { error.value = "查询暂时失败，正在重试：" + message(exc); schedule(1200); } }
   }
+  function restore(status: MaterialJob) {
+    // 刷新后可查询或取消已有任务；删除动作须重新从当前接口选择，不复用缺失表单。
+    job.value = status;
+    schedule();
+  }
   async function submit(kind: "preview" | "remove") {
     if (!action.value || working.value) return;
     pending.value = { op: kind === "preview" ? "material_removal_preview" : "material_removal_submit", args: {
@@ -113,5 +121,5 @@ export function useMaterialRemoval(options: {
       void request("material_job_cancel", { job_id: job.value.job_id }).catch(() => undefined);
   });
   return { visible, action, job, report, loading, working, pending, error, stage, open, close,
-    preview: () => submit("preview"), remove: () => submit("remove"), cancel, retry };
+    preview: () => submit("preview"), remove: () => submit("remove"), cancel, retry, restore };
 }

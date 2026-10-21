@@ -20,6 +20,7 @@ const emit = defineEmits<{
   remove: [];
   cancel: [];
   retry: [];
+  minimize: [];
 }>();
 </script>
 
@@ -45,11 +46,12 @@ const emit = defineEmits<{
       </ul>
     </div>
     <template #footer>
+      <ElButton v-if="working" @click="emit('minimize')">收起任务</ElButton>
       <ElButton v-if="job && !['succeeded','failed','cancelled','stale'].includes(job.state)" :disabled="loading" @click="emit('cancel')">取消任务</ElButton>
       <ElButton :disabled="working" @click="emit('update:modelValue', false)">关闭</ElButton>
       <ElButton v-if="pending" type="primary" :loading="loading" @click="emit('retry')">重试原请求</ElButton>
       <ElButton v-else-if="!eligible" type="primary" :loading="loading" :disabled="working || !action" @click="emit('preview')">检查使用情况</ElButton>
-      <ElButton v-else type="danger" :loading="loading" :disabled="working || job?.operation === 'removal' || job?.state !== 'succeeded'" @click="emit('remove')">删除并验证</ElButton>
+      <ElButton v-else type="danger" :loading="loading" :disabled="working || !action || job?.operation === 'removal' || job?.state !== 'succeeded'" @click="emit('remove')">删除并验证</ElButton>
     </template>
   </ElDialog>
 </template>

@@ -1,5 +1,5 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from "vue";
-import { request, CoreRequestError } from "../api";
+import { request as coreRequest, CoreRequestError } from "../api";
 import {
   materialActions, terminalJob, type MaterialDraft, type MaterialJob, type MaterialPlan, type MaterialAction, type VariantOptions,
 } from "../materialBatch";
@@ -7,12 +7,15 @@ import {
 /** 批量表单与后台短请求；轮询不重叠，网络重试保留同一请求键和原动作。 */
 export function useMaterialBatch(options: {
   dll: Ref<string>;
+  documentId: string;
   blocked: () => boolean;
   drain: () => Promise<unknown>;
   setBusy: (value: boolean) => void;
   committed: (plan: MaterialPlan) => Promise<void>;
   choosePath: (title: string, kind: "open" | "save", value?: string) => Promise<string | null>;
 }) {
+  const request = <T>(op: string, args: Record<string, unknown> = {}) =>
+    coreRequest<T>(op, { ...args, document_id: options.documentId });
   const visible = shallowRef(false);
   const rows = ref<MaterialDraft[]>([]);
   const record = shallowRef<number | undefined>();
@@ -114,6 +117,11 @@ export function useMaterialBatch(options: {
         schedule(1200);
       }
     }
+  }
+  function restore(status: MaterialJob) {
+    // 只恢复已有任务的控制入口；表单草稿不猜测重建，原任务继续使用后端候选。
+    job.value = status;
+    if (!terminalJob(status)) schedule();
   }
   async function submitPending() {
     if (!pending.value || loading.value) return;
@@ -239,5 +247,5 @@ export function useMaterialBatch(options: {
   });
   return { visible, rows, record, plan, job, error, pending, loading, working, hasTextures,
            mode, variant, notice, candidate, add, open, close, preview, start, cancel, submitPending,
-           exportVariant, discardVariant, chooseTarget, saveProject, readProject };
+           exportVariant, discardVariant, chooseTarget, saveProject, readProject, restore };
 }

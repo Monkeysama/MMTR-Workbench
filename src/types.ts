@@ -50,6 +50,8 @@ export interface Group {
   shader_models: Record<string, number>;
 }
 export interface DocumentInfo {
+  revision?: number;
+  exported_revision?: number;
   source: string;
   size: number;
   sha256: string;
@@ -65,6 +67,23 @@ export interface DocumentInfo {
   passes: Pass[];
   metadata: Metadata[];
 }
+export interface DocumentTab {
+  id: string;
+  label: string;
+  source: string | null;
+  dirty: boolean;
+  mdfSource: string | null;
+  busy: boolean;
+  modal: boolean;
+}
+// 根容器只接触生命周期能力；编辑、编译结果和选择状态始终归标签自己所有。
+export interface DocumentController {
+  ready: Promise<boolean>;
+  loadMmtr: (path: string) => Promise<unknown>;
+  loadMdf: (path: string) => Promise<unknown>;
+  confirmClose: () => Promise<boolean>;
+}
+export type DocumentState = Pick<DocumentTab, "source" | "mdfSource" | "dirty" | "busy" | "modal">;
 export type Tab = "overview" | "passes" | "shaders" | "metadata" | "source" | "mdf";
 export interface MdfProperty {
   name: string;
@@ -172,6 +191,7 @@ export interface DialogState {
   kind: "text" | "confirm" | "open" | "save" | "parameter" | "mdf-property" | "mdf-texture" | "resource";
   confirmLabel: string;
   placeholder?: string;
+  multiple?: boolean;
   parameter?: { name: string; byteSize: string; byteOffset: string };
   fields?: Record<string, string>;
   selectOptions?: Array<{ value: string; label: string; size?: number }>;

@@ -3,15 +3,14 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { isDesktop } from "../api";
 
 export function droppedDocuments(paths: string[]) {
-  const files: { mmtr?: string; mdf?: string } = {};
+  const files: Array<{ kind: "mmtr" | "mdf"; path: string }> = [];
   const unique = new Map(paths.map(path => [path.replaceAll("\\", "/").toLowerCase(), path]));
   if (!unique.size) throw new Error("请拖入 MMTR 或 MDF 文件。");
   for (const path of unique.values()) {
     const kind = /\.(mmtr|mmrt)(\.\d+)?$/i.test(path) ? "mmtr"
       : /\.mdf2?(\.\d+)?$/i.test(path) ? "mdf" : null;
     if (!kind) throw new Error("只支持拖入 MMTR 或 MDF 文件（含版本后缀），请勿拖入文件夹或其他文件。");
-    if (files[kind]) throw new Error("一次最多打开一个 MMTR 和一个 MDF，请分别拖入同类文件。");
-    files[kind] = path;
+    files.push({ kind, path });
   }
   return files;
 }
@@ -33,7 +32,7 @@ export function useDocumentDrop(options: {
     catch (e) { return e instanceof Error ? e.message : String(e); }
   });
   const title = computed(() => problem.value ? "暂时无法打开" : "松开以打开文件");
-  const description = computed(() => problem.value || "MMTR · MDF，可同时拖入各一个");
+  const description = computed(() => problem.value || "多个文件分别打开；一对 MMTR 与 MDF 在同一标签打开");
 
   async function drop(incoming: string[]) {
     active.value = false;
