@@ -13,18 +13,20 @@ from mmtr_editor.structure import parse_structure, document_structure
 PATH = Path('MaterialShader/Variation/synthetic.mmtr.240906211')
 
 
-# 四组共享同一 PS/绑定/状态，测试共享者闭包及非零未知字节的保留。
-def fixture():
-    data = bytearray(16+4*0x110)
+# 各组共享同一 PS/绑定/状态，测试共享者闭包及非零未知字节的保留。
+def fixture(group_count=4, programs_per_group=1):
+    record_count = group_count * programs_per_group
+    data = bytearray(16+record_count*0x110)
     data[:4] = b'SDF\0'
-    struct.pack_into('<HH', data, 4, 4, 1)
+    struct.pack_into('<HH', data, 4, group_count, programs_per_group)
 
     def append(blob):
         position = len(data)
         data.extend(blob)
         return position
 
-    name = append(b'Pass\0')
+    names = [append(b'Pass\0' if programs_per_group == 1 else f'Pass{i}\0'.encode())
+             for i in range(programs_per_group)]
     cbname = append(b'UserMaterial\0')
     membername = append(b'Value\0')
     texname = append(b'BaseMap\0')
@@ -49,9 +51,9 @@ def fixture():
     assert len(blob) == 72
     data.extend(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)))
     struct.pack_into('<Q', data, 8, start)
-    for i in range(4):
+    for i in range(record_count):
         base = 16+i*0x110
-        for field, pointer in [(0, name), (0x30, start), (0x40, layout), (0x48, raster), (0x50, blend),
+        for field, pointer in [(0, names[i % programs_per_group]), (0x30, start), (0x40, layout), (0x48, raster), (0x50, blend),
                                (0x58, depth), (0x68, cb), (0x70, metadata_cb), (0x88, srv), (0x90, metadata_srv)]:
             struct.pack_into('<Q', data, base+field, pointer)
         struct.pack_into('<I', data, base+0xCC, len(blob))

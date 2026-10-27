@@ -131,7 +131,7 @@ class Program:
 
 @dataclass(frozen=True)
 class Header:
-    """现有四组布局的 header，资源版本只从文件名提取。"""
+    """四/五组布局的 header，资源版本只从文件名提取，组数不代表资源类别。"""
     raw: bytes
     group_count: int
     programs_per_group: int

@@ -109,29 +109,23 @@ def _add_cbuffer_member_bytes(data: bytes, cbuffer_name: str, member_name: str,
         raise EditError('MMTR 常量缓冲大小超出 16 位范围。')
 
     old_start = info['shader_start']
-    insert_pos = first['members_offset'] + first['member_count'] * 16
     name_bytes = member_name.encode('ascii') + b'\0'
-    head_delta = 16
-    name_delta = len(name_bytes)
-    prefix = bytearray(data[:insert_pos])
-    entry_pos = len(prefix)
-    prefix.extend(struct.pack('<QIHH', 0, murmur3_x86_32(member_name.encode('ascii'), 0xffffffff), byte_offset, byte_size))
-    prefix.extend(data[insert_pos:old_start])
+    # 尾部复制成员表；绑定/状态/未知块不移动，避免遗漏其内部或根指针。
+    prefix = bytearray(data[:old_start])
     new_name_offset = len(prefix)
     prefix.extend(name_bytes)
+    member_offset = len(prefix)
+    prefix.extend(data[first['members_offset']:first['members_offset']+first['member_count']*16])
+    prefix.extend(struct.pack('<QIHH', new_name_offset, murmur3_x86_32(member_name.encode('ascii'), 0xffffffff), byte_offset, byte_size))
     new_shader_start = len(prefix)
-    locations = _metadata_pointer_locations(info)
-    for old_location in locations:
-        new_location = old_location + head_delta if old_location >= insert_pos else old_location
-        if new_location + 8 > len(prefix):
-            continue
-        old_value = struct.unpack_from('<Q', data, old_location)[0]
-        struct.pack_into('<Q', prefix, new_location, _shift_pointer(old_value, insert_pos, head_delta + name_delta if old_value >= old_start else head_delta))
-    struct.pack_into('<Q', prefix, entry_pos, new_name_offset)
+    for record in info['records']:
+        for ref in record['shader_references']:
+            struct.pack_into('<Q', prefix, record['offset']+ref['field'], ref['offset']+new_shader_start-old_start)
     for entry in entries:
-        descriptor = entry['offset'] + head_delta if entry['offset'] >= insert_pos else entry['offset']
+        descriptor = entry['offset']
         struct.pack_into('<I', prefix, descriptor + 16, new_size)
         struct.pack_into('<I', prefix, descriptor + 20, entry['member_count'] + 1)
+        struct.pack_into('<Q', prefix, descriptor + 24, member_offset)
     struct.pack_into('<Q', prefix, 8, new_shader_start)
     return bytes(prefix) + data[old_start:]
 
@@ -257,9 +251,12 @@ class Document:
         self.original = bytes(data)
         try:
             _, self.info = inspect_data(self.original, self.source)
-            if (self.info['header_u16_04'] != 4 or not self.info['candidate_groups']
+            groups = self.info['header_u16_04']
+            # 只放开已研究的四/五组；声明记录必须完整，不能接受兼容扫描的截断结果。
+            if (groups not in (4, 5) or len(self.info['candidate_groups']) != groups
+                    or self.info['record_count'] != groups * self.info['header_u16_06']
                     or any(not g['name_sequence_matches_first'] for g in self.info['candidate_groups'])):
-                raise EditError('当前版本仅支持已研究的四组同名序列 SDF/MMTR 布局。')
+                raise EditError('当前版本仅支持完整的四组或五组同名序列 SDF/MMTR 布局。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
         self.replacements: dict[int, bytes] = {}

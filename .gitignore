@@ -52,6 +52,7 @@ htmlcov/
 *.7z
 
 # Credentials, local settings and temporary files
+/MEMORY.md
 .env
 .env.*
 !.env.example
