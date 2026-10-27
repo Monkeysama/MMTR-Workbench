@@ -72,6 +72,15 @@ def material_reads(ir, *, include_static=False):
         # 自定义Shader可直接按float读取同一材质CB；地址证明和字段迁移与整数读取相同。
         cb = re.fullmatch(r'call %dx\.types\.CBufRet\.(i32|f32) @dx\.op\.cbufferLoadLegacy\.\1\(i32 59, %dx.types.Handle %\w+, i32 (\d+)\)', text)
         raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle %\w+, i32 (%\w+|\d+), i32 (0|undef), i8 (\d+), i32 4\)', text)
+        legacy_raw = re.fullmatch(r'call %dx.types.ResRet.i32 @dx.op.bufferLoad.i32\(i32 68, %dx.types.Handle %\w+, i32 (%\w+|\d+), i32 (0)\)', text)
+        if legacy_raw and kind == 'raw':
+            # SM6.0 的 BindlessBuffer 以 bufferLoad 读取；仅接受反射证明的 uint4/16B 表。
+            from inspect_mmtr import reflection
+            reflected = reflection(ir)
+            if not any(buffer['name'] == 'BindlessBuffer' and buffer['size'] == 16
+                       for buffer in reflected['structured_buffers']):
+                raise ValueError('旧式 BindlessBuffer 不是已验证的16B结构化表。')
+            raw = legacy_raw
         if cb and kind in ('cb', 'static'):
             register = int(cb[2])
         elif raw and raw[1].isdigit():

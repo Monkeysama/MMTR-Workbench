@@ -15,6 +15,7 @@ from mmtr_editor.hashes import murmur3_x86_32
 from .material_addresses import MaterialTailLayout, material_reads, relocate_material_reads
 from .model import Document, EditError, interface_chunks
 from .dxil_sources import parse, handle_sources
+from .material_textures import native_texture_reads
 
 
 # 拆分完整容器；只重建明确修改的chunk，STAT必须来自修改后的反射模块。
@@ -207,7 +208,7 @@ def append_metadata(data, source, operation):
         for cb in entries:
             struct.pack_into('<IIQ', prefix, cb['offset']+16, operation['new_size'], first['member_count']+len(parameters), at)
     textures = operation.get('textures_added', [operation['texture']] if operation.get('texture') else [])
-    if textures:
+    if textures and operation['tables']:
         name_addresses = [append(name.encode('ascii')+b'\0', 1) for name in textures]
         for group in operation['tables']:
             records = [info['records'][i] for i in group['records']]
@@ -290,26 +291,20 @@ def texture_tables(document, layout, record_index):
     if not 0 <= record_index < len(info['records']):
         raise EditError('MMTR记录索引无效。')
     names = {e['offset']: e['name'] for e in info['metadata']['srvs']}
-    selected_names = {names[x] for x in info['records'][record_index]['metadata_tables']['srvs']}
-    material_names = set(layout.texture_names).intersection(selected_names)
-    if not material_names:
-        raise EditError('所选记录未使用关联MDF纹理表，请选择材质绘制记录。')
+    if not any(ref['stage'] == 'ps' for ref in info['records'][record_index]['shader_references']):
+        raise EditError('所选记录没有PS，请选择材质绘制记录。')
+    material_names = set(layout.texture_names)
     tables, shaders = {}, set()
     for record in info['records']:
         offsets = tuple(record['metadata_tables']['srvs'])
-        if not material_names.issubset({names[x] for x in offsets}):
+        # 原生材质的纹理名不在 MMTR SRV 表。PS 在隔离 worker 中按实际句柄证明；
+        # 这里仅收集固定表候选，不能提前把动态表改造成固定 SRV。
+        shaders.update(ref['shader_index'] for ref in record['shader_references'] if ref['stage'] == 'ps')
+        if not material_names.intersection(names[x] for x in offsets):
             continue
         if record['per_stage_counts_raw']['srvs'][5] or not any(ref['stage'] == 'ps' for ref in record['shader_references']):
             raise EditError('材质纹理表包含未支持的计算阶段或没有PS。')
         tables.setdefault(offsets, []).append(record['index'])
-        shaders.update(ref['shader_index'] for ref in record['shader_references'] if ref['stage'] == 'ps')
-    if not any(record_index in records for records in tables.values()):
-        raise EditError('所选记录未使用关联MDF纹理表，请选择材质绘制记录。')
-    selected = {i for records in tables.values() for i in records}
-    from .structure import document_structure
-    shared = document_structure(document).shader_users
-    if any(use.program not in selected for index in shaders for use in shared[index]):
-        raise EditError('材质PS被其它未识别资源表共享，不能局部扩展。')
     return tables, shaders
 
 
@@ -318,6 +313,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                               actions=None, plan_context=None, expected_plan=None, progress=None):
     from .dxil_assembly import DxilAssembly
     from .material_plan import plan_material_edit, dll_identity
+    from .material_markers import material_marker_reads, relocate_material_markers
     if actions is None:
         if bool(parameter) == bool(texture):
             raise EditError('一次只能新增一个参数或纹理接口。')
@@ -336,9 +332,14 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     new_size = new.parameter_bytes
     parameters = [p.declaration() for p in plan.parameters]
     textures = [t.name for t in plan.textures]
+    components = sum(p['count'] for p in material['properties'])
+    added_components = sum(p.byte_size//4 for p in plan.parameters)
     info = document.current_info()
     original_data = document.build()[0]
     tables, texture_shaders = dict(plan.tables), set(plan.texture_shaders)
+    fixed_candidates = {ref['shader_index'] for records in tables.values() for i in records
+                        for ref in info['records'][i]['shader_references'] if ref['stage'] == 'ps'}
+    native_proofs, fixed_shaders = {}, set()
     counters = {'disassemble': 0, 'assemble': 0, 'validate': 0, 'shader_cache_hits': 0,
                 'analyzed_shaders': 0, 'migration_calls': 0}
     durations = {'planning': time.perf_counter()-started, 'analysis': 0.0, 'declarations': 0.0,
@@ -383,7 +384,11 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             has_texture = index in texture_shaders
             cache_key = (hashlib.sha256(original).digest(), shader['stage'], plan_digest, has_texture, 'assemble-stat-v1')
             if cache_key in cache:
-                payload, after, allocated, relocated, strides = cache[cache_key]
+                payload, after, allocated, relocated, strides, proofs, fixed, markers = cache[cache_key]
+                if proofs:
+                    native_proofs[index] = proofs
+                if fixed:
+                    fixed_shaders.add(index)
                 cache.move_to_end(cache_key)
                 counters['shader_cache_hits'] += 1
                 reflections[index] = hashlib.sha256(payload if payload is not None else original).digest(), after
@@ -391,7 +396,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                     candidate.replace_shader(index, payload, allow_interface_change=True,
                                              note={'material_extension': True, 'dxc_validated': True})
                     registers[index] = allocated
-                    reports.append({'index': index, 'relocated_reads': relocated, 'instance_strides': strides})
+                    reports.append({'index': index, 'relocated_reads': relocated, 'instance_strides': strides,
+                                    'material_markers': markers})
                 continue
             ir = invoke(compiler, 'disassemble', original)
             tick = time.perf_counter()
@@ -399,16 +405,27 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             reflections[index] = hashlib.sha256(original).digest(), before
             has_cb = bool(parameters) and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
             reads = material_reads(ir)
+            proofs = native_texture_reads(ir, old, reads, before) if has_texture else []
+            if proofs:
+                native_proofs[index] = proofs
+            has_texture = index in fixed_candidates and not proofs
+            if has_texture:
+                fixed_shaders.add(index)
             counters['analyzed_shaders'] += 1
             durations['analysis'] += time.perf_counter()-tick
             # 未修改声明的Shader保持原文本；同一源只解析一次供计划和编译后对照使用。
             edited, allocated = (declarations(ir, has_cb, has_texture)
                                 if has_cb or has_texture else (ir, None))
             tick = time.perf_counter()
-            edited, relocation = relocate_material_reads(edited, old, new, reads=reads)
+            try:
+                edited, ordinary_reads, guards = relocate_material_markers(
+                    edited, old, new, components, added_components, reads)
+                edited, relocation = relocate_material_reads(edited, old, new, reads=ordinary_reads)
+            except ValueError as exc:
+                raise EditError(f'Shader #{index} 材质地址迁移失败：{exc}') from exc
             counters['migration_calls'] += 1
             durations['migration'] += time.perf_counter()-tick
-            if not has_cb and not has_texture and not relocation['relocated_extracts'] and not (
+            if edited == ir and not has_cb and not has_texture and not relocation['relocated_extracts'] and not (
                     relocation['instance_stride_ssa'] and old.parameter_bytes != new_size):
                 continue
             reflected_ir = invoke(compiler, 'disassemble', reflection_container(original))
@@ -423,9 +440,15 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             reflections[index] = hashlib.sha256(payload).digest(), after
             if bodies(actual) != bodies(edited) or interface_chunks(original) != interface_chunks(payload):
                 raise EditError(f'Shader #{index} 的原计算/签名出现意外变化。')
-            previous_reads = {ex['ssa']: ex['offset'] for r in reads if r['kind'] != 'instance' for ex in r['extracts']}
+            previous_reads = {ex['ssa']: ex['offset'] for r in ordinary_reads if r['kind'] != 'instance' for ex in r['extracts']}
             compiled_reads = material_reads(actual)
-            actual_reads = {ex['ssa']: ex['offset'] for r in compiled_reads if r['kind'] != 'instance' for ex in r['extracts']}
+            if proofs and native_texture_reads(actual, new, compiled_reads, after) != proofs:
+                raise EditError(f'Shader #{index} 的原生动态纹理槽身份发生变化。')
+            compiled_ordinary, compiled_guards = material_marker_reads(
+                actual, new, components+added_components, compiled_reads)
+            if [(g['extract'], g['comparison']) for g in compiled_guards] != [(g['extract'], g['comparison']) for g in guards]:
+                raise EditError(f'Shader #{index} 编译后材质布局标记不一致。')
+            actual_reads = {ex['ssa']: ex['offset'] for r in compiled_ordinary if r['kind'] != 'instance' for ex in r['extracts']}
             if any(actual_reads.get(ssa) != old.offset_in(offset, new) for ssa, offset in previous_reads.items()):
                 raise EditError(f'Shader #{index} 编译后材质字段读取不一致。')
             # 常量地址的0号实例读取没有步长，偏移由迁移保证仍在原参数区内。
@@ -456,9 +479,9 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                                      note={'material_extension': True, 'dxc_validated': True})
             registers[index] = allocated or ()
             reports.append({'index': index, 'relocated_reads': len(relocation['relocated_extracts']),
-                            'instance_strides': len(relocation['instance_stride_ssa'])})
+                            'instance_strides': len(relocation['instance_stride_ssa']), 'material_markers': len(guards)})
             cache[cache_key] = (payload, after, allocated or (), len(relocation['relocated_extracts']),
-                                len(relocation['instance_stride_ssa']))
+                                len(relocation['instance_stride_ssa']), proofs, has_texture, len(guards))
             cache_bytes += len(payload)
             while len(cache) > 64 or cache_bytes > 64*1024*1024:
                 _, row = cache.popitem(last=False)
@@ -471,14 +494,34 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     operation = dict(kind='extend_material_interface', parameter=parameter, texture=texture,
                      parameters=parameters, textures_added=textures, new_size=new_size,
                      textures=list(new.texture_names), gpbf=list(new.gpbf_names), tables=[])
+    if textures:
+        selected_refs = [ref['shader_index'] for ref in info['records'][plan.texture_record]['shader_references']
+                         if ref['stage'] == 'ps']
+        if not any(index in native_proofs or index in fixed_shaders for index in selected_refs):
+            raise EditError('所选记录未证明关联MDF的固定或原生动态纹理读取。')
+        # 固定表追加必须覆盖 PS 的每个使用者；动态 PS 沿用已有描述符和记录字节。
+        from .structure import document_structure
+        shared = document_structure(document).shader_users
+        selected = {i for records in tables.values() for i in records}
+        if any(use.program not in selected for index in fixed_shaders for use in shared[index]):
+            raise EditError('材质PS被其它未识别资源表共享，不能局部扩展。')
+        if any(any(use.role != 'ps' for use in shared[index]) for index in native_proofs):
+            raise EditError('原生材质PS被其它阶段共享，不能证明纹理绑定。')
     for offsets, records in tables.items():
         by_record = {}
         for index in records:
+            ps = [ref['shader_index'] for ref in info['records'][index]['shader_references'] if ref['stage'] == 'ps']
+            if all(shader in native_proofs for shader in ps):
+                continue
+            if not all(shader in fixed_shaders for shader in ps):
+                raise EditError('共享记录的固定/动态纹理策略不一致。')
             used = {registers[ref['shader_index']] for ref in info['records'][index]['shader_references'] if ref['stage'] == 'ps'}
             if len(used) != 1:
                 raise EditError('共享记录的新增纹理寄存器不唯一。')
             by_record[str(index)] = used.pop()
-        operation['tables'].append({'records': records, 'registers': by_record})
+        if by_record:
+            operation['tables'].append({'records': [i for i in records if str(i) in by_record], 'registers': by_record})
+    operation['native_textures'] = {str(index): proofs for index, proofs in native_proofs.items()}
     operation['shader_hashes'] = {str(s['index']): hashlib.sha256(candidate.shader_bytes(s['index'])).hexdigest()
                                   for s in info['shaders']}
     operation['redirects'] = [[record, field, target] for (record, field), target in sorted(candidate.redirects.items())]
@@ -499,6 +542,11 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             pointer = struct.unpack_from('<Q', rebuilt, base+0x88)[0]
             if rebuilt[pointer:pointer+count*8] != original_data[old_pointer:old_pointer+count*8]:
                 raise EditError('原SRV绑定映射被改变。')
+        else:
+            # 除 Shader 引用/长度和统一 CB 尺寸外，未追加固定表的记录及其资源表逐字保留。
+            for start, end in ((0x40, 0xb8), (0xd4, 0x110)):
+                if rebuilt[base+start:base+end] != original_data[base+start:base+end]:
+                    raise EditError('未选固定纹理表的记录结构被改变。')
     progress('validating', 0, 1)
     validation = candidate.validate_metadata_interfaces(dll, _in_worker=True, _reflections=reflections)
     if not validation['valid']:
@@ -510,5 +558,6 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     document.metadata_edits = candidate.metadata_edits
     progress('validated', 1, 1)
     return {'changed_shaders': len(reports), 'shader_reports': reports, 'srv_records': len(affected),
+            'native_texture_shaders': len(native_proofs), 'native_texture_reads': sum(map(len, native_proofs.values())),
             'parameter_bytes': new_size, 'validation': validation, 'plan': plan.report(),
             'statistics': counters, 'seconds': {**durations, 'total': time.perf_counter()-started}}

@@ -49,6 +49,7 @@ class MaterialEditPlan:
     tables: tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
     texture_shaders: tuple[int, ...]
     shader_candidates: tuple[int, ...]
+    texture_record: int | None = None
     variant_master: str | None = None
 
     @property
@@ -135,4 +136,4 @@ def plan_material_edit(document, material, dll, actions, record_index=None, *, s
     return MaterialEditPlan(hashlib.sha256(document.build()[0]).hexdigest(), source_revision, mdf_sha256,
         dll_identity(dll), old, new, tuple(parameters), tuple(textures), tuple(order), tuple(target_materials),
         tuple((offsets, tuple(records)) for offsets, records in tables.items()), tuple(sorted(texture_shaders)),
-        tuple(s['index'] for s in info['shaders']), variant_master)
+        tuple(s['index'] for s in info['shaders']), record_index if textures else None, variant_master)

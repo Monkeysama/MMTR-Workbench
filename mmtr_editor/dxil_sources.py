@@ -44,7 +44,7 @@ def handle_sources(ir, defs):
         if not rhs.startswith('call %dx.types.Handle @dx.op.'):
             continue
         legacy = re.fullmatch(r'call %dx.types.Handle @dx.op.createHandle\(i32 57, i8 (\d+), i32 (\d+), i32 ([%\w.]+), i1 (?:false|true)\)', rhs)
-        modern = re.fullmatch(r'call %dx.types.Handle @dx.op.createHandleFromBinding\(i32 217, %dx.types.ResBind \{ i32 (\d+), i32 (\d+), i32 (\d+), i8 (\d+) \}, i32 ([%\w.]+), i1 (?:false|true)\)', rhs)
+        modern = re.fullmatch(r'call %dx.types.Handle @dx.op.createHandleFromBinding\(i32 217, %dx.types.ResBind \{ i32 (\d+), i32 (-?\d+), i32 (\d+), i8 (\d+) \}, i32 ([%\w.]+), i1 (?:false|true)\)', rhs)
         zero = 'createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer,' in rhs
         heap = re.fullmatch(r'call %dx.types.Handle @dx.op.createHandleFromHeap\(i32 218, i32 ([%\w.]+), i1 (?:false|true), i1 (?:false|true)\)', rhs)
         if legacy:
