@@ -1,4 +1,4 @@
-"""荒野 0x110 Program 的只读结构与绑定索引，无 UI/DXC 或写入能力。
+"""SDF Program（荒野 0x110、RE4 0x108）的只读结构与绑定索引，无 UI/DXC 或写入能力。
 
 字段参考 REasy 0eb38af 的公开格式定义，独立实现；保留原字节与未知值。
 旧 inspect_data 仍是兼容解析入口，新解释的问题只进入诊断，不改变其浏览行为。
@@ -7,16 +7,15 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 import hashlib
 from pathlib import Path
-import re
 import struct
 
-from inspect_mmtr import inspect_data
+from inspect_mmtr import FORMATS, inspect_data
 
 STAGES = ('vs', 'hs', 'ds', 'gs', 'ps', 'cs')
 TABLES = ('cbuffers', 'samplers', 'srvs', 'uavs', 'optional')
 COUNTS = (0xF6, 0xF7, 0xFC, 0xFD, 0xFE)
 TYPES = ({255}, {0}, {0, 1, 2, 3, 4, 5, 6, 128}, {12, 13, 14, 15, 16, 128}, set())
-KNOWN_VERSIONS = {240906211}  # 当前固定语料只证明该资源版本；版本来自文件名而非 header。
+KNOWN_VERSIONS = set(FORMATS)  # 只登记有原版语料核对的资源版本；版本来自文件名而非 header。
 
 
 @dataclass(frozen=True)
@@ -114,7 +113,7 @@ class ShaderRef:
 
 @dataclass(frozen=True)
 class Program:
-    """单个 0x110 记录的只读投影，原字节负责保留所有未知字段。"""
+    """单个记录（0x110 或 0x108）的只读投影，原字节负责保留所有未知字段。"""
     index: int
     target: int
     offset: int
@@ -254,8 +253,8 @@ def parse_structure(data, path, info=None):
     objects, users = {}, defaultdict(list)
     shader_users = [[] for _ in info['shaders']]
     lower, upper = info['record_end'], info['shader_start']
-    version_match = re.search(r'\.mmtr\.(\d+)$', str(path), re.I)
-    version = int(version_match[1]) if version_match else None
+    version = info['resource_version']
+    record_size = info['record_size']
 
     def diagnostic(code, program, field, message, severity='error'):
         diagnostics.append(Diagnostic(severity, code, program, field, message))
@@ -279,7 +278,7 @@ def parse_structure(data, path, info=None):
                           for kind, entries in info['metadata'].items()}
     for record in info['records']:
         i, base = record['index'], record['offset']
-        raw = data[base:base+0x110]
+        raw = data[base:base+record_size]
         refs, tables, object_refs = [], [], []
         for ref in record['shader_references']:
             field = ref['field']
@@ -374,7 +373,7 @@ def parse_structure(data, path, info=None):
                         object_refs.append(trailer_key)
         programs.append(Program(i, i//max(1, info['header_u16_06']), base, record['name'], raw,
             tuple(refs), tuple(tables), tuple(object_refs), total,
-            struct.unpack_from('<3H', raw, 0x108), struct.unpack_from('<H', raw, 0x10E)[0], raw[0xFF:0x108].hex()))
+            struct.unpack_from('<3H', raw, record_size-8), struct.unpack_from('<H', raw, record_size-2)[0], raw[0xFF:record_size-8].hex()))
 
     # 相同范围异类、同址异长和部分交叠分别报出；同类完全共享只记录反向使用者。
     ordered = sorted(objects.items(), key=lambda pair: (pair[1][1], pair[1][2], pair[0]))

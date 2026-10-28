@@ -37,7 +37,7 @@ def build_migration_report(material: dict[str, Any], source_info: dict[str, Any]
         source = source_members.get(name)
         target = target_members[name]
         prop = mdf_props.get(name)
-        if prop is None and re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d+', name):
+        if prop is None and re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', name):
             status = 'reserve_value_unspecified'
         elif source is None:
             status = "target_default_required"

@@ -54,6 +54,16 @@ export const materialJobStageLabels: Record<string, string> = {
   analyzing_removal: "分析接口使用情况", removing_shaders: "处理 Shader 删除",
   validating_removal: "验证删除候选", source_changed: "源状态已改变",
 };
+/** 各游戏独立变体的默认 master；与核心 MDF_VERSIONS 的根目录一致，未知游戏按荒野处理。 */
+const variantMasters: Record<string, string> = {
+  MHWilds: "MaterialShader/Variation/variant.mmtr",
+  RE4: "_Chainsaw/MasterMaterial/Variation/variant.mmtr",
+};
+export const defaultVariantMaster = (game?: string) => variantMasters[game ?? ""] ?? variantMasters.MHWilds;
+/** 用户未改过的默认 master 随当前 MDF 的游戏切换；已手动填写的值保持不变。 */
+export const variantMasterFor = (current: string, game?: string) =>
+  Object.values(variantMasters).includes(current) ? defaultVariantMaster(game) : current;
+
 export const terminalJob = (job: MaterialJob) =>
   ["succeeded", "failed", "cancelled", "stale"].includes(job.state);
 

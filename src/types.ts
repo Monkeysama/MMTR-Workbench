@@ -178,6 +178,7 @@ export interface MdfDocument {
   size: number;
   sha256: string;
   version: number;
+  game: string;
   material_count: number;
   materials: MdfMaterialSummary[];
   selected: MdfMaterial | null;

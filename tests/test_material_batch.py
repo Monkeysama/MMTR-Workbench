@@ -193,8 +193,8 @@ float4 main(float4 position: SV_Position) : SV_Target {
         cls.mdf_source = bytes(mdf)
 
     @staticmethod
-    def source_with_payloads(*blobs):
-        prefix = bytearray(mmtr_fixture())
+    def source_with_payloads(*blobs, group_count=4, record_size=0x110):
+        prefix = bytearray(mmtr_fixture(group_count, record_size=record_size))
         start = struct.unpack_from('<Q', prefix, 8)[0]
         prefix = prefix[:start]
         cb = struct.unpack_from('<Q', prefix, 16+0x70)[0]
@@ -204,10 +204,10 @@ float4 main(float4 position: SV_Position) : SV_Target {
         for blob in blobs:
             offsets.append(cursor)
             cursor += len(blob)+8
-        for i in range(4):
+        for i in range(group_count):
             blob = blobs[i%len(blobs)]
-            struct.pack_into('<Q', prefix, 16+i*0x110+0x30, offsets[i%len(blobs)])
-            struct.pack_into('<I', prefix, 16+i*0x110+0xCC, len(blob))
+            struct.pack_into('<Q', prefix, 16+i*record_size+0x30, offsets[i%len(blobs)])
+            struct.pack_into('<I', prefix, 16+i*record_size+0xCC, len(blob))
         return bytes(prefix)+b''.join(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)) for blob in blobs)
 
     def service(self):
@@ -291,28 +291,37 @@ float4 main(float4 position: SV_Position) : SV_Target {
 ''', 'main', 'ps_6_6')
         first = self.source[struct.unpack_from('<Q', self.source, 8)[0]:]
         first = first[:struct.unpack_from('<I', self.source, 16+0xCC)[0]]
-        source = self.source_with_payloads(first, second)
         from mmtr_editor.material_extension import extend_material_interface
         from mmtr_editor.mdf import _public_data
-        serial_doc = Document(source, Path('MaterialShader/test.mmtr.240906211'))
-        parallel_doc = Document(source, serial_doc.source)
-        serial_mdf, parallel_mdf = MdfDocument(self.mdf_source), MdfDocument(self.mdf_source)
-        action = [{'action': 'parameter', 'name': 'SharedP', 'byte_size': 4}]
-        serial = extend_material_interface(serial_doc, _public_data(serial_mdf.material(0)), str(NATIVE_DXC),
-                                          actions=action, record_index=0, parallel=False)
-        events = []
-        parallel = extend_material_interface(parallel_doc, _public_data(parallel_mdf.material(0)), str(NATIVE_DXC),
-                                            actions=action, record_index=0, parallel=True,
-                                            progress=lambda *event: events.append(event))
-        self.assertIn(('shards', 2, 2), events)
-        self.assertEqual(parallel_doc.build()[0], serial_doc.build()[0])
-        self.assertEqual(parallel['changed_shaders'], 2)
-        self.assertEqual(parallel['statistics']['analyzed_shaders'], 2)
-        self.assertEqual(parallel['statistics']['assemble'], 4)
-        self.assertEqual(serial['statistics'], parallel['statistics'])
-        for key in ('changed_shaders', 'shader_reports', 'srv_records', 'native_texture_shaders',
-                    'native_texture_reads', 'parameter_bytes', 'validation', 'plan'):
-            self.assertEqual(serial[key], parallel[key], key)
+        # 两种记录长度都经过真实分片进程；RE4 的源路径和 MDF 版本不能在进程间退回荒野格式。
+        for groups, size, version, mdf_version, master in (
+                (4, 0x110, 240906211, 45, 'MaterialShader/test.mmtr'),
+                (3, 0x108, 221007879, 32, '_Chainsaw/MasterMaterial/test.mmtr')):
+            with self.subTest(version=version):
+                source = self.source_with_payloads(first, second, group_count=groups, record_size=size)
+                serial_doc = Document(source, Path(f'{master}.{version}'))
+                parallel_doc = Document(source, serial_doc.source)
+                serial_mdf = MdfDocument(self.mdf_source, Path(f'test.mdf2.{mdf_version}'))
+                parallel_mdf = MdfDocument(self.mdf_source, serial_mdf.source)
+                for mdf in (serial_mdf, parallel_mdf):
+                    for material in mdf.materials:
+                        mdf.set_master(material['index'], master)
+                action = [{'action': 'parameter', 'name': 'SharedP', 'byte_size': 4}]
+                serial = extend_material_interface(serial_doc, _public_data(serial_mdf.material(0)), str(NATIVE_DXC),
+                                                  actions=action, record_index=0, parallel=False)
+                events = []
+                parallel = extend_material_interface(parallel_doc, _public_data(parallel_mdf.material(0)), str(NATIVE_DXC),
+                                                      actions=action, record_index=0, parallel=True,
+                                                      progress=lambda *event: events.append(event))
+                self.assertIn(('shards', 2, 2), events)
+                self.assertEqual(parallel_doc.build()[0], serial_doc.build()[0])
+                self.assertEqual(parallel['changed_shaders'], 2)
+                self.assertEqual(parallel['statistics']['analyzed_shaders'], 2)
+                self.assertEqual(parallel['statistics']['assemble'], 4)
+                self.assertEqual(serial['statistics'], parallel['statistics'])
+                for key in ('changed_shaders', 'shader_reports', 'srv_records', 'native_texture_shaders',
+                            'native_texture_reads', 'parameter_bytes', 'validation', 'plan'):
+                    self.assertEqual(serial[key], parallel[key], key)
 
     def test_two_successive_parallel_batches_commit_independently(self):
         second, _, _ = compile_hlsl(str(NATIVE_DXC), '''

@@ -13,6 +13,7 @@ import struct
 from . import __version__
 from .material_plan import dll_identity
 from .material_variant import validate_variant_master
+from .mdf import mdf_suffix_ok
 from .model import EditError, atomic_write
 
 MAX_PROJECT_BYTES = 2 * 1024 * 1024
@@ -67,7 +68,9 @@ def _request(value):
         _keys(variant, ('master', 'mmtr_path', 'mdf_path', 'overwrite'))
         validate_variant_master(variant['master'])
         _path(variant['mmtr_path'])
-        _path(variant['mdf_path'], '.mdf2.45')
+        _path(variant['mdf_path'])
+        if not mdf_suffix_ok(variant['mdf_path']):
+            raise EditError('工程 MDF 输出路径必须以已支持的 .mdf2.N 结尾。')
         if type(variant['overwrite']) is not bool:
             raise EditError('工程 overwrite 必须是布尔值。')
     return value

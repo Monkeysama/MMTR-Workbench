@@ -269,6 +269,19 @@ class MdfEditingTests(unittest.TestCase):
         self.doc.reset()
         self.assertEqual(self.doc.build()[0], self.original)
 
+    def test_texture_path_on_structural_material_survives_rebuild_in_either_order(self):
+        # 重建结构表时字符串缓存须以原字节为键；以当前路径为键会把新路径指回旧字符串，重解析校验随之拒绝。
+        for first_texture in (True, False):
+            with self.subTest(first_texture=first_texture):
+                doc = MdfDocument(self.original)
+                edits = [lambda: doc.set_texture(0, 0, 'Textures/new_path.tex'), lambda: doc.add_property(0, 'Added', [0]*4)]
+                for edit in (edits if first_texture else edits[::-1]):
+                    edit()
+                reopened = MdfDocument(doc.build()[0])
+                self.assertEqual(reopened.material(0)['textures'][0]['path'], 'Textures/new_path.tex')
+                self.assertEqual(reopened.material(0)['properties'][-1]['name'], 'Added')
+                self.assertEqual(reopened.material(1)['textures'][0]['path'], 'Textures/shared.tex')
+
     def test_invalid_master_is_rejected_before_mutation_and_rpc_clears_links(self):
         for value in ('', '../test.mmtr', '/MaterialShader/test.mmtr', 'C:/test.mmtr',
                       'MaterialShader/../test.mmtr', 'MaterialShader/test.mmtr.240906211',

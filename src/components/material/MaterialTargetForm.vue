@@ -20,7 +20,7 @@ function update(patch: Partial<VariantOptions>) { emit("update:variant", { ...pr
     </ElRadioGroup>
     <template v-if="mode === 'independent_variant'">
       <div class="variant-heading"><strong>独立变体目标</strong><ElTag type="info" effect="plain">仅作用于所选材质</ElTag></div>
-      <label class="target-field"><span>MMTR 资源引用</span><ElInput :model-value="variant.master" :disabled="disabled" aria-label="变体 master" placeholder="MaterialShader/Variation/name.mmtr"
+      <label class="target-field"><span>MMTR 资源引用</span><ElInput :model-value="variant.master" :disabled="disabled" aria-label="变体 master" placeholder="MaterialShader/Variation/name.mmtr（RE4：_Chainsaw/MasterMaterial/…）"
         @update:model-value="update({ master: $event })" /></label>
       <div v-for="key in (['mmtr_path', 'mdf_path'] as const)" :key="key" class="target-field">
         <span>{{ key === 'mmtr_path' ? 'MMTR 输出文件' : 'MDF 输出文件' }}</span>
