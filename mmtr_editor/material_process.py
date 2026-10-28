@@ -32,10 +32,15 @@ def restore_document(state):
     return document
 
 
+# 冻结包和源码环境复用同一入口；分片子进程必须与顶层 worker 使用完全相同的命令。
+def material_worker_command():
+    return ([sys.executable, '--material-worker'] if getattr(sys, 'frozen', False)
+            else [sys.executable, '-m', 'mmtr_editor.material_worker'])
+
+
 # 单次批处理独占一个可回收进程，避免逐Shader启动进程；原生崩溃/超时不影响编辑器。
 def run_material_task(document, operation, dll, *, timeout=300, worker_control=None, **arguments):
-    command = ([sys.executable, '--material-worker'] if getattr(sys, 'frozen', False)
-               else [sys.executable, '-m', 'mmtr_editor.material_worker'])
+    command = material_worker_command()
     request = {'protocol': 1, 'op': operation, 'dll': str(Path(dll).resolve()),
                'document': document_state(document), **arguments}
     try:

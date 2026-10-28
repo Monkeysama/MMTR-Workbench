@@ -1,8 +1,9 @@
-"""Workbench材质接口末尾扩展；串行构造独立候选，全部检查后才提交内存事务。
+"""Workbench材质接口末尾扩展；构造独立候选，全部检查后才提交内存事务。
 
 仅支持已有UserMaterial的float1..4尾部参数与已有PS表的Texture2D。
 调用方提供关联MDF的布局证明；未知IR、阶段或绑定不猜测，不接触游戏文件。
 """
+import base64
 import copy
 from collections import OrderedDict
 import hashlib
@@ -310,7 +311,8 @@ def texture_tables(document, layout, record_index):
 
 # 旧单项入口只包装一个计划动作，与批量共用一次迁移/编译路径。
 def extend_material_interface(document, material, dll, *, parameter=None, texture=None, record_index=None,
-                              actions=None, plan_context=None, expected_plan=None, progress=None):
+                              actions=None, plan_context=None, expected_plan=None, progress=None,
+                              parallel=False, shard_indices=None):
     from .dxil_assembly import DxilAssembly
     from .material_plan import plan_material_edit, dll_identity
     from .material_markers import material_marker_reads, relocate_material_markers
@@ -323,6 +325,13 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
         raise EditError('批量动作不能与旧单项参数混用。')
     started = time.perf_counter()
     progress = progress or (lambda *args: None)
+    shard_mode = shard_indices is not None
+    if shard_mode:
+        if (not isinstance(shard_indices, list) or not shard_indices
+                or any(type(index) is not int for index in shard_indices)
+                or len(shard_indices) != len(set(shard_indices))):
+            raise EditError('Shader 分片索引无效。')
+        shard_indices = sorted(shard_indices)
     progress('planning', 0, 0)
     plan = plan_material_edit(document, material, dll, actions, record_index, **(plan_context or {}))
     if expected_plan is not None and plan.digest != expected_plan:
@@ -372,13 +381,27 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
 
     candidate = copy.deepcopy(document)
     reports, registers, reflections = [], {}, {}
+    changed_payloads = {}
+    batch = None
+    if parallel and not shard_mode:
+        from .material_parallel import run_shards
+        batch = run_shards(document, material, dll, actions, record_index, plan_context, plan_digest,
+                           plan.source_sha256, plan.dxc_sha256, info, texture_shaders, progress)
     # 只在同次隔离 worker 内复用，键包含源载荷、阶段、布局/绑定计划及 DXC 身份。
     # 最多保留 64 项/64MiB 载荷，避免把大量 IR 或历史文档留成全局缓存。
     cache, cache_bytes = OrderedDict(), 0
-    compiler = DxilAssembly(dll)
+    compiler = None if batch is not None else DxilAssembly(dll)
     try:
-        for position, shader in enumerate(info['shaders']):
-            progress('shaders', position, len(info['shaders']))
+        selected_shaders = ([] if batch is not None else
+                            ([next(item for item in info['shaders'] if item['index'] == index)
+                              for index in shard_indices] if shard_mode else info['shaders']))
+        if shard_mode:
+            # 同缓存键在分片内连续执行，避免其它分片抽走中间项后改变命中行为。
+            selected_shaders.sort(key=lambda item: (
+                hashlib.sha256(document.shader_bytes(item['index'])).digest(), item['stage'],
+                item['index'] in texture_shaders, item['index']))
+        for position, shader in enumerate(selected_shaders):
+            progress('shaders', position, len(selected_shaders))
             index = shader['index']
             original = document.shader_bytes(index)
             has_texture = index in texture_shaders
@@ -393,6 +416,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                 counters['shader_cache_hits'] += 1
                 reflections[index] = hashlib.sha256(payload if payload is not None else original).digest(), after
                 if payload is not None:
+                    if shard_mode:
+                        changed_payloads[index] = payload
                     candidate.replace_shader(index, payload, allow_interface_change=True,
                                              note={'material_extension': True, 'dxc_validated': True})
                     registers[index] = allocated
@@ -482,6 +507,8 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                         raise EditError('新增参数反射布局不符合预期。')
                 elif updated != cb:
                     raise EditError('原常量缓冲反射发生意外变化。')
+            if shard_mode:
+                changed_payloads[index] = payload
             candidate.replace_shader(index, payload, allow_interface_change=True,
                                      note={'material_extension': True, 'dxc_validated': True})
             registers[index] = allocated or ()
@@ -493,8 +520,46 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             while len(cache) > 64 or cache_bytes > 64*1024*1024:
                 _, row = cache.popitem(last=False)
                 cache_bytes -= len(row[0])
+        if shard_mode:
+            if dll_identity(dll) != plan.dxc_sha256:
+                raise EditError('DXC 身份在执行期间改变，拒绝提交。')
+            from .material_parallel import PAYLOAD_CACHE_BYTES
+            payload_bytes = sum(len(payload) for payload in changed_payloads.values())
+            if payload_bytes > PAYLOAD_CACHE_BYTES:
+                raise EditError('Shader 分片候选载荷超过预算。')
+            covered = sorted(shader['index'] for shader in selected_shaders)
+            return {
+                'plan_digest': plan_digest, 'source_sha256': plan.source_sha256, 'dxc_sha256': plan.dxc_sha256,
+                'covered': covered,
+                'replacements': {str(index): base64.b64encode(payload).decode('ascii')
+                                 for index, payload in sorted(changed_payloads.items())},
+                'reports': reports,
+                'registers': {str(index): list(values) for index, values in sorted(registers.items())},
+                'reflections': {str(index): [digest.hex(), row]
+                                for index, (digest, row) in sorted(reflections.items())},
+                'native_proofs': {str(index): value for index, value in sorted(native_proofs.items())},
+                'fixed_shaders': sorted(fixed_shaders),
+                'counters': dict(counters), 'durations': dict(durations), 'cache_bytes': cache_bytes}
+        if batch is not None:
+            if dll_identity(dll) != plan.dxc_sha256:
+                raise EditError('DXC 身份在执行期间改变，拒绝合并分片。')
+            for index, payload in sorted(batch['replacements'].items()):
+                candidate.replace_shader(index, payload, allow_interface_change=True,
+                                         note={'material_extension': True, 'dxc_validated': True})
+            reports.extend(batch['reports'])
+            registers.update(batch['registers'])
+            reflections.update(batch['reflections'])
+            native_proofs.update(batch['native_proofs'])
+            fixed_shaders.update(batch['fixed_shaders'])
+            for key, value in batch['counters'].items():
+                counters[key] += value
+            for key, value in batch['durations'].items():
+                if key != 'planning':
+                    durations[key] += value
+            reports.sort(key=lambda row: row['index'])
     finally:
-        compiler.close()
+        if compiler is not None:
+            compiler.close()
     progress('shaders', len(info['shaders']), len(info['shaders']))
     progress('building', 0, 1)
     tick = time.perf_counter()

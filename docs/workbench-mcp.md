@@ -245,4 +245,4 @@ P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取
 
 同一会话按全部编辑值缓存重建结果及已解析结构。验证结论还绑定 DXC 路径和 DLL 内容；Shader、元数据、迁移证明、引用或 DXC 改变后均重新检查。自动扩展完成后立即调用 `validate` 或 `export` 可以复用已验证结果。重新打开导出文件时，内存缓存不会写入资产或跨进程复用。
 
-旧 `workbench_add_parameter/add_texture` 仍是同步长调用。混合批次和独立变体优先使用 `workbench_material_preview/submit/status/cancel/result`；短提交与查询避免长调用结果不明，原生迁移和编译仍串行执行。超时重试沿用原请求键和内容，不能换键重复追加。更大的文件仍可能需要较长时间，不能把某个本地样本的耗时当作全部 MMTR 的上限。
+旧 `workbench_add_parameter/add_texture` 仍是同步长调用。混合批次和独立变体优先使用 `workbench_material_preview/submit/status/cancel/result`；短提交与查询避免长调用结果不明。单个材质扩展在隔离 worker 内最多启动 4 个受控子进程，按完整缓存键分组；每片工作集上限为 128 MiB 源数据与 64 MiB 载荷缓存，整组上限 240 秒（分片不足或预算不允许时退回串行）。任一子进程失败、超时、取消或返回不完整/重复覆盖时整批丢弃，父 worker 仍执行全局重建、重开、接口验证和 DXC 身份核对，外层 worker 的 300 秒上限与作业对象回收继续兜底。超时重试沿用原请求键和内容，不能换键重复追加。更大的文件仍可能需要较长时间，不能把某个本地样本的耗时当作全部 MMTR 的上限。

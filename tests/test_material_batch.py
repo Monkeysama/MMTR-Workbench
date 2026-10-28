@@ -192,6 +192,24 @@ float4 main(float4 position: SV_Position) : SV_Target {
         struct.pack_into('<H', mdf, 304+20, 4)
         cls.mdf_source = bytes(mdf)
 
+    @staticmethod
+    def source_with_payloads(*blobs):
+        prefix = bytearray(mmtr_fixture())
+        start = struct.unpack_from('<Q', prefix, 8)[0]
+        prefix = prefix[:start]
+        cb = struct.unpack_from('<Q', prefix, 16+0x70)[0]
+        members = struct.unpack_from('<Q', prefix, cb+24)[0]
+        struct.pack_into('<H', prefix, members+14, 16)
+        offsets, cursor = [], start
+        for blob in blobs:
+            offsets.append(cursor)
+            cursor += len(blob)+8
+        for i in range(4):
+            blob = blobs[i%len(blobs)]
+            struct.pack_into('<Q', prefix, 16+i*0x110+0x30, offsets[i%len(blobs)])
+            struct.pack_into('<I', prefix, 16+i*0x110+0xCC, len(blob))
+        return bytes(prefix)+b''.join(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)) for blob in blobs)
+
     def service(self):
         service = Service()
         service.doc = Document(self.source, Path('MaterialShader/test.mmtr.240906211'))
@@ -262,6 +280,65 @@ float4 main(float4 position: SV_Position) : SV_Target {
             self.assertEqual(after['textures'][-2]['name'], 'MapA')
             self.assertEqual(after['textures'][-1]['name'], 'MapB')
             self.assertEqual(after['properties'][-1]['values'], [16.0]*4)
+
+    def test_two_shards_match_sequential_output_and_counters(self):
+        second, _, _ = compile_hlsl(str(NATIVE_DXC), '''
+cbuffer UserMaterial : register(b0) { float4 VAR_Value; };
+Texture2D<float4> BaseMap : register(t3);
+float4 main(float4 position: SV_Position) : SV_Target {
+    return BaseMap.Load(int3(position.xy, 0)) * VAR_Value + 0.25;
+}
+''', 'main', 'ps_6_6')
+        first = self.source[struct.unpack_from('<Q', self.source, 8)[0]:]
+        first = first[:struct.unpack_from('<I', self.source, 16+0xCC)[0]]
+        source = self.source_with_payloads(first, second)
+        from mmtr_editor.material_extension import extend_material_interface
+        from mmtr_editor.mdf import _public_data
+        serial_doc = Document(source, Path('MaterialShader/test.mmtr.240906211'))
+        parallel_doc = Document(source, serial_doc.source)
+        serial_mdf, parallel_mdf = MdfDocument(self.mdf_source), MdfDocument(self.mdf_source)
+        action = [{'action': 'parameter', 'name': 'SharedP', 'byte_size': 4}]
+        serial = extend_material_interface(serial_doc, _public_data(serial_mdf.material(0)), str(NATIVE_DXC),
+                                          actions=action, record_index=0, parallel=False)
+        events = []
+        parallel = extend_material_interface(parallel_doc, _public_data(parallel_mdf.material(0)), str(NATIVE_DXC),
+                                            actions=action, record_index=0, parallel=True,
+                                            progress=lambda *event: events.append(event))
+        self.assertIn(('shards', 2, 2), events)
+        self.assertEqual(parallel_doc.build()[0], serial_doc.build()[0])
+        self.assertEqual(parallel['changed_shaders'], 2)
+        self.assertEqual(parallel['statistics']['analyzed_shaders'], 2)
+        self.assertEqual(parallel['statistics']['assemble'], 4)
+        self.assertEqual(serial['statistics'], parallel['statistics'])
+        for key in ('changed_shaders', 'shader_reports', 'srv_records', 'native_texture_shaders',
+                    'native_texture_reads', 'parameter_bytes', 'validation', 'plan'):
+            self.assertEqual(serial[key], parallel[key], key)
+
+    def test_two_successive_parallel_batches_commit_independently(self):
+        second, _, _ = compile_hlsl(str(NATIVE_DXC), '''
+cbuffer UserMaterial : register(b0) { float4 VAR_Value; };
+Texture2D<float4> BaseMap : register(t3);
+float4 main(float4 position: SV_Position) : SV_Target {
+    return BaseMap.Load(int3(position.xy, 0)) * VAR_Value + 0.5;
+}
+''', 'main', 'ps_6_6')
+        first = self.source[struct.unpack_from('<Q', self.source, 8)[0]:]
+        first = first[:struct.unpack_from('<I', self.source, 16+0xCC)[0]]
+        service = Service()
+        service.doc = Document(self.source_with_payloads(first, second), Path('MaterialShader/test.mmtr.240906211'))
+        service.mdf = MdfDocument(self.mdf_source)
+        service.mdf_selected = 0
+        first_result = self.apply(service, [{'action': 'parameter', 'name': 'FirstP', 'byte_size': 4}])
+        second_result = self.apply(service, [{'action': 'texture', 'name': 'SecondMap'}])
+        for result in (first_result, second_result):
+            self.assertEqual(result['interface_sync']['changed_shaders'], 2)
+            self.assertEqual(result['interface_sync']['statistics']['analyzed_shaders'], 2)
+            self.assertTrue(result['interface_sync']['validation']['valid'])
+        reopened = Document(service.doc.build()[0], service.doc.source)
+        self.assertFalse(reopened.integrity['name_hash_mismatches'])
+        self.assertFalse(reopened.integrity['shader_trailer_mismatches'])
+        self.assertEqual(service.mdf.material(0)['properties'][-1]['name'], 'FirstP')
+        self.assertEqual(service.mdf.material(0)['textures'][-1]['name'], 'SecondMap')
 
     def test_batch_and_sequential_have_identical_final_semantics(self):
         actions = [{'action': 'texture', 'name': 'MapA'}, {'action': 'parameter', 'name': 'P', 'byte_size': 8}]

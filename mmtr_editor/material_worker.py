@@ -50,16 +50,30 @@ def execute(request):
             progress=progress_writer(request.get('progress_file')))
         return {'document': document_state(document), 'report': report,
                 'sha256': hashlib.sha256(document.build()[0]).hexdigest()}
-    if request['op'] != 'extend':
+    if request['op'] not in ('extend', 'extend_shard'):
         raise ValueError('Unknown material worker operation')
     from .material_extension import extend_material_interface
     from .material_control import progress_writer
-    report = extend_material_interface(document, request['material'], request['dll'],
-                                        parameter=request.get('parameter'), texture=request.get('texture'),
-                                        record_index=request.get('record_index'), actions=request.get('actions'),
-                                        plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'),
-                                        progress=progress_writer(request.get('progress_file')))
-    return {'document': document_state(document), 'report': report,
+    progress = progress_writer(request.get('progress_file'))
+    shard_indices = request.get('shard_indices') if request['op'] == 'extend_shard' else None
+    if request['op'] == 'extend_shard' and not isinstance(shard_indices, list):
+        raise ValueError('Shader 分片索引缺失。')
+    if shard_indices is not None:
+        from .material_plan import plan_material_edit
+        plan = plan_material_edit(document, request['material'], request['dll'], request.get('actions'),
+                                  request.get('record_index'), **(request.get('plan_context') or {}))
+        if plan.digest != request.get('expected_plan'):
+            raise ValueError('Shader 分片计划身份已改变。')
+    result = extend_material_interface(document, request['material'], request['dll'],
+                                       parameter=request.get('parameter') if shard_indices is None else None,
+                                       texture=request.get('texture') if shard_indices is None else None,
+                                       record_index=request.get('record_index'), actions=request.get('actions'),
+                                       plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'),
+                                       progress=progress, parallel=shard_indices is None,
+                                       shard_indices=shard_indices)
+    if shard_indices is not None:
+        return result
+    return {'document': document_state(document), 'report': result,
             'sha256': hashlib.sha256(document.build()[0]).hexdigest()}
 
 

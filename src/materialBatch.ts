@@ -48,7 +48,7 @@ export interface MaterialJob {
 
 export const materialJobStageLabels: Record<string, string> = {
   queued: "等待执行", preparing: "准备候选", starting: "启动 DXC", planning: "核对计划",
-  shaders: "处理 Shader", building: "重建 MMTR", validating: "验证接口",
+  shaders: "处理 Shader", shards: "处理 Shader 分片", building: "重建 MMTR", validating: "验证接口",
   validated: "候选已验证", committing: "核对源状态", complete: "修改已暂存",
   candidate_ready: "候选已验证", exporting: "正在导出", exported: "变体已导出", discarded: "候选已丢弃",
   analyzing_removal: "分析接口使用情况", removing_shaders: "处理 Shader 删除",
