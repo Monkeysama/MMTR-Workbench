@@ -351,16 +351,15 @@ def run_shards(document, material, dll, actions, record_index, plan_context, pla
     finally:
         # 先终止仍未退出的进程组，再等待通信线程；避免卡住的管道读取拖住回收。
         if os.name == 'nt':
-            # Job 句柄带 KILL_ON_JOB_CLOSE；关闭一次即可回收其持有的全部分片。
+            # Job 回收已归属分片；分配失败的进程仍由本函数逐个回收。
             if job is not None:
                 job.close()
-            else:
-                for process in processes:
-                    if process.poll() is None:
-                        try:
-                            process.kill()
-                        except OSError:
-                            pass
+            for process in processes:
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
         else:
             for process in processes:
                 if process.poll() is None:
@@ -371,6 +370,8 @@ def run_shards(document, material, dll, actions, record_index, plan_context, pla
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
         for process in processes:
+            # 启动阶段可能还没有通信线程，须确认退出后再关闭管道和临时目录。
+            process.wait()
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     try:

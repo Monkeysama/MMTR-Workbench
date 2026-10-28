@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -95,6 +96,8 @@ class MaterialShardTests(unittest.TestCase):
                 return json.dumps({'protocol': 1, 'ok': True, 'result': good}).encode(), b''
             def poll(self):
                 return self.returncode
+            def wait(self):
+                return self.returncode
 
         before = self.document.build()[0]
         processes = []
@@ -118,6 +121,54 @@ class MaterialShardTests(unittest.TestCase):
         request = {'protocol': 1, 'op': 'extend_shard', 'document': document_state(self.document)}
         with self.assertRaisesRegex(ValueError, '分片索引缺失'):
             execute(request)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows Job 分配失败的真实进程回收验收')
+    def test_job_assignment_failure_reaps_all_started_children_without_mutation(self):
+        from mmtr_editor.material_control import _WindowsJob
+
+        before = self.document.build()[0]
+        real_popen = subprocess.Popen
+        # 第一片尚无 Job，第二片已有 Job；两种失败都必须回收所有已启动进程。
+        for fail_at in (1, 2):
+            with self.subTest(fail_at=fail_at):
+                launched, assigned = [], []
+
+                class FailingJob(_WindowsJob):
+                    def assign(self, process):
+                        assigned.append(process.pid)
+                        if len(assigned) == fail_at:
+                            raise OSError('injected Job assignment failure')
+                        super().assign(process)
+
+                def launch(*args, **kwargs):
+                    process = real_popen(*args, **kwargs)
+                    launched.append(process)
+                    return process
+
+                try:
+                    with mock.patch('mmtr_editor.material_parallel.plan_shards', return_value=[[0], [0]]), \
+                         mock.patch('mmtr_editor.material_parallel.material_worker_command',
+                                    return_value=[sys.executable, '-c', 'import time; time.sleep(60)']), \
+                         mock.patch('mmtr_editor.material_parallel.subprocess.Popen', side_effect=launch), \
+                         mock.patch('mmtr_editor.material_control._WindowsJob', FailingJob):
+                        with self.assertRaisesRegex(OSError, 'injected Job assignment failure'):
+                            run_shards(self.document, {}, 'C:/fake.dll', [], None, {}, self.digest,
+                                       '2'*64, '3'*64, self.info, set(), lambda *args: None, workers=2)
+                    self.assertEqual(len(launched), fail_at)
+                    for process in launched:
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            self.fail(f'Job 分配失败后子进程 {process.pid} 仍在运行。')
+                        self.assertTrue(all(stream.closed for stream in
+                                            (process.stdin, process.stdout, process.stderr)))
+                    self.assertEqual(before, self.document.build()[0])
+                finally:
+                    # 测试失败时也只回收本用例创建的进程，避免污染后续验收。
+                    for process in launched:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait(timeout=3)
 
     def test_timeout_kills_all_real_shard_processes(self):
         # 只验证整体 deadline 的实际进程回收；重复分配在超时前不会进入覆盖成功路径。
