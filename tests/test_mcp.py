@@ -39,6 +39,8 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         return result.structured_content
 
     async def test_tool_schemas_and_annotations(self):
+        from mmtr_editor.hashes import XXH64_BACKEND
+        self.assertEqual((await self.call('status'))['xxh64_backend'], XXH64_BACKEND)
         tools = {t.name: t for t in await self.server.list_tools()}
         self.assertEqual(len(tools), 34)
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)

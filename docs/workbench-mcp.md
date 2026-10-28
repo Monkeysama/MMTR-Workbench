@@ -23,7 +23,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 替换便携包里的核心 EXE 后，需要在客户端重连 MCP，已运行的进程不会自动切换到新代码。
 
-源码开发先运行 `npm run core:build`，把官方 SDK 安装到项目 `.build/editor-deps`；也可在当前 Python 环境运行 `python -m pip install -r requirements-editor.txt`。配置 command 为 Python 可执行文件，args 为项目中 `scripts/run_mcp.py` 的绝对路径。手动启动可用 `npm run --silent mcp`；stdio 客户端应直接调用 Python/EXE，保持 stdout 仅含协议。
+源码开发先运行 `npm run core:build`，把官方 SDK 和原生 xxHash 安装到项目 `.build/editor-deps`；也可在当前 Python 环境运行 `python -m pip install -r requirements-editor.txt`。配置 command 为 Python 可执行文件，args 为项目中 `scripts/run_mcp.py` 的绝对路径。手动启动可用 `npm run --silent mcp`；stdio 客户端应直接调用 Python/EXE，保持 stdout 仅含协议。
 
 ## 工具
 
@@ -31,7 +31,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 |工具|用途|
 |---|---|
-|`workbench_status`|版本、当前文件、修改计数、未导出状态和编译结果大小|
+|`workbench_status`|版本、当前文件、修改计数、未导出状态、编译结果大小及 xxh64_backend（native/python）|
 |`workbench_configure`|设置本会话 DXC DLL 路径|
 |`workbench_open`|原子打开 MMTR、MDF 或两者；默认保护待替换文档的未导出修改|
 |`workbench_select_material`|切换后续操作使用的 MDF 材质|

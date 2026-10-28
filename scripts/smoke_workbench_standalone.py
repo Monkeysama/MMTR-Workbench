@@ -19,7 +19,7 @@ from mmtr_editor.mcp_server import WorkbenchSession, create_server
 
 
 # 每个编辑/导出操作经过协议，错误反例验证服务端整批回滚；临时文件归本进程所有。
-async def verify(executable, dxc=None):
+async def verify(executable, dxc=None, *, require_native_hash=False):
     command = str(Path(executable).resolve()) if executable else sys.executable
     arguments = ['--mcp'] if executable else [str(ROOT / 'scripts' / 'run_mcp.py')]
     # 按当前源码契约核对完整工具清单，避免工具增加后固定数量误报或冻结包遗漏工具。
@@ -49,6 +49,11 @@ async def verify(executable, dxc=None):
                     result = await client.call_tool('workbench_' + name, args)
                     assert not result.is_error, result.content
                     return result.structured_content
+
+                status = await call('status')
+                hash_backend = status.get('xxh64_backend')
+                if require_native_hash:
+                    assert hash_backend == 'native', f'MCP未加载原生xxHash：{hash_backend}'
 
                 if dxc:
                     await call('configure', dxc_path=str(Path(dxc).resolve()))
@@ -80,6 +85,7 @@ async def verify(executable, dxc=None):
                 assert other['master'] == 'MaterialShader/test.mmtr'
                 assert source.read_bytes() == original
     return {'passed': True, 'tools': len(actual_tools), 'version': __version__, 'command': command,
+            'xxh64_backend': hash_backend,
             'temporary_cwd': True, 'synthetic_input_only': True, 'game_tested': False, 'native_compile_checked': bool(dxc),
             'executable_sha256': hashlib.sha256(Path(executable).read_bytes()).hexdigest() if executable else None}
 
@@ -88,9 +94,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executable', help='冻结mmtr-core.exe；省略则连接本仓库源码')
     parser.add_argument('--dxc', help='可选dxcompiler.dll，另验证隔离进程的合成HLSL编译')
+    parser.add_argument('--require-native-hash', action='store_true', help='要求实际加载原生xxHash，阻止漏包后回退')
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()
-    report = asyncio.run(verify(args.executable, args.dxc))
+    report = asyncio.run(verify(args.executable, args.dxc, require_native_hash=args.require_native_hash))
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

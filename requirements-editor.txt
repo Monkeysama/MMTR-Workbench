@@ -1,2 +1,4 @@
 # 官方MCP SDK；仅MCP入口需要，GUI继续复用同一编辑核心。
 mcp==2.3.0
+# 桌面和MCP共用的Shader尾标加速；缺依赖时仍使用核心内的纯Python实现。
+xxhash==3.6.0

@@ -76,7 +76,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          python scripts/smoke_workbench_standalone.py --executable release/MMTR-Workbench/mmtr-core.exe
+          python scripts/smoke_workbench_standalone.py --executable release/MMTR-Workbench/mmtr-core.exe --require-native-hash
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/verify_release_package.py --version "$env:RELEASE_VERSION"
       - uses: actions/upload-artifact@v4

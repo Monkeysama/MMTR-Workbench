@@ -33,7 +33,7 @@ def main():
     deps = ROOT / '.build' / 'pyinstaller'
     if not (deps / 'PyInstaller').is_dir():
         subprocess.run([sys.executable, '-m', 'pip', 'install', '--target', str(deps), 'pyinstaller==6.22.3'], check=True)
-    # MCP官方SDK只安装在项目构建目录；执行.pth以发现Windows pywin32扩展，不污染全局Python。
+    # 编辑核心依赖只安装在项目构建目录；执行.pth以发现Windows扩展，不污染全局Python。
     editor_deps = ROOT / '.build' / 'editor-deps'
     requirements = ROOT / 'requirements-editor.txt'
     marker = editor_deps / '.requirements-editor'
@@ -49,6 +49,7 @@ def main():
                     '--collect-submodules', 'mcp.server', '--collect-submodules', 'mcp.shared',
                     '--collect-data', 'mcp', '--collect-all', 'mcp_types', '--copy-metadata', 'mcp',
                     '--copy-metadata', 'mcp-types',
+                    '--collect-all', 'xxhash',
                     '--paths', str(ROOT), '--distpath', str(ROOT / '.build' / 'core'),
                     '--workpath', str(ROOT / '.build' / 'freeze'), '--specpath', str(ROOT / '.build'),
                     str(ROOT / 'scripts' / 'editor_core_entry.py')], cwd=ROOT, env=environment, check=True)

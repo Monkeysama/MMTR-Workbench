@@ -33,7 +33,7 @@ npm run core:build
 npm run desktop:dev
 ```
 
-`core:build` 将 PyInstaller 与 MCP 构建依赖安装到项目 `.build/`，生成桌面所需 sidecar。仅调试网页与 Python 核心时运行 `npm run dev`，服务监听 `127.0.0.1:5173`；开发端口已被占用时先关闭旧开发实例。
+`core:build` 将 PyInstaller、MCP 和原生 xxHash 依赖安装到项目 `.build/`，生成桌面所需 sidecar。Shader 尾标使用完整载荷校验，优先调用原生 xxHash；无该依赖的源码环境继续使用纯 Python 实现。仅调试网页与 Python 核心时运行 `npm run dev`，服务监听 `127.0.0.1:5173`；开发端口已被占用时先关闭旧开发实例。
 
 ```powershell
 npm run test:core

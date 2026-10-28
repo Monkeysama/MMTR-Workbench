@@ -15,6 +15,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from . import __version__
+from .hashes import XXH64_BACKEND
 from .mdf import MdfDocument, _public_data, master_matches
 from .model import Document, EditError, atomic_write
 from .rpc import Service
@@ -176,6 +177,7 @@ class WorkbenchSession:
     def status(self):
         service = self.service
         result = {'version': __version__, 'revision': self.revision, 'dxc_path': self.dll,
+                  'xxh64_backend': XXH64_BACKEND,
                   'session': 'independent_process', 'transport': 'stdio',
                   'capabilities': ['paged_queries', 'shader_compile_replace', 'mdf_batch_edit',
                                    'auto_parameter_texture_extension', 'mdf_master_edit', 'validated_export',

@@ -2,7 +2,7 @@
 
 ## 环境与启动
 
-Python 3.11+，Node.js 22.18+，npm；Windows 桌面另需 Rust stable、MSVC C++ Build Tools、Windows SDK、WebView2。Python 基础解析无需第三方库，MCP 使用 requirements-editor.txt 中锁定的官方 SDK。
+Python 3.11+，Node.js 22.18+，npm；Windows 桌面另需 Rust stable、MSVC C++ Build Tools、Windows SDK、WebView2。Python 基础解析无需第三方库；安装 requirements-editor.txt 中锁定的 xxhash 后，完整 Shader 尾标校验改用原生实现，缺依赖时使用纯 Python 后备。MCP 使用其中锁定的官方 SDK。
 
 ```powershell
 npm ci
@@ -12,7 +12,7 @@ npm run dev
 
 开发网页通过 Vite 的本机桥连接 Python RPC，仅监听127.0.0.1:5173。桌面开发先执行 `npm run core:build`，再 `npm run desktop:dev`；已有服务占用端口时先结束对应旧开发实例。不要同时运行两份占同端口的服务。
 
-`npm run core:build` 在本项目 `.build/` 准备 PyInstaller 和 MCP SDK，再冻结核心。更新依赖前结束使用同一依赖目录的开发MCP，避免Windows文件锁。Node/Rust依赖由锁文件管理；不拷贝旧项目node_modules或构建产物作为新构建结果。
+`npm run core:build` 在本项目 `.build/` 准备 PyInstaller、MCP SDK 和原生 xxHash，再冻结核心，显式收集 xxhash 扩展模块。更新依赖前结束使用同一依赖目录的开发MCP，避免Windows文件锁。Node/Rust依赖由锁文件管理；不拷贝旧项目node_modules或构建产物作为新构建结果。
 
 DXC 为用户自行提供的 Microsoft dxcompiler.dll。工具设置可以指定路径；Python核心也支持 `MMTR_DXC_PATH` 作为初始路径。未配置时不绑定某位开发者的安装目录。DLL不进入Git。
 
@@ -40,7 +40,7 @@ python scripts/package_editor.py
 
 或运行 `npm run package`。输出在release；不要提交EXE/DLL/ZIP、.build、src-tauri/target、src-tauri/binaries或生成schema。可用 `python scripts/package_editor.py --output-dir release/MMTR-Workbench-0.3.0` 生成独立便携目录，避免覆盖运行中的EXE。
 
-打包后核对manifest、冻结核心版本、GUI版本及真实MCP初始化。`python scripts/smoke_workbench_standalone.py` 使用合成MDF验证源码stdio；加 `--executable release/MMTR-Workbench/mmtr-core.exe` 验证冻结服务，两者都在临时工作目录运行，不要求任何游戏文件。通用stdio验收脚本为 `scripts/smoke_workbench_mcp.py`，输入参数见 `--help`；该完整场景需要自有兼容MMTR/MDF和DXC，不自动安装到游戏。MCP配置移动目录后需更新command绝对路径。
+打包后核对manifest、冻结核心版本、GUI版本及真实MCP初始化。`python scripts/smoke_workbench_standalone.py` 使用合成MDF验证源码stdio；加 `--executable release/MMTR-Workbench/mmtr-core.exe` 验证冻结服务，两者都在临时工作目录运行，不要求任何游戏文件。加 `--require-native-hash` 要求服务实际报告原生 xxHash 后端，阻止扩展漏包后静默回退；CI 的源码与发布包验收均启用此检查。通用stdio验收脚本为 `scripts/smoke_workbench_mcp.py`，输入参数见 `--help`；该完整场景需要自有兼容MMTR/MDF和DXC，不自动安装到游戏。MCP配置移动目录后需更新command绝对路径。
 
 ## 证据边界
 
