@@ -32,6 +32,61 @@ class MaterialTailLayout:
         return new_fields[name]
 
 
+_RAW = r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle (%\w+), i32 (%\w+), i32 (\d+), i8 \d+, i32 4\)'
+
+
+# RE4 的可见性缓冲/网格变体经 Instances 读取 BindlessBuffer 中的网格表，不是材质参数：
+#   行 = ((((X >> 16) & 255) + 1) >> 1) + Instances[i].字节52 / 16
+# （8 字节表头后每项 8 字节，按项号奇偶取 x 或 z），读出的子网格记录地址再 >> 4 读取后续行。
+# 只接受这一确切形态，以及只以其读出值（extractvalue 或两者之间的 select）为基址的链式读取；其它形态照常识别或拒绝。
+def _mesh_table_reads(definitions, origins):
+    def text(value):
+        return definitions.get(value, {}).get('text', '')
+
+    def buffer(handle):
+        return origins.get(handle, {}).get('binding', {}).get('name')
+
+    def mesh_row(value):
+        shape = re.fullmatch(r'lshr i32 (%\w+), 1', text(value))
+        shape = shape and re.fullmatch(r'add nuw nsw i32 (%\w+), 1', text(shape[1]))
+        shape = shape and re.fullmatch(r'and i32 (%\w+), 255', text(shape[1]))
+        return bool(shape and re.fullmatch(r'lshr i32 %\w+, 16', text(shape[1])))
+
+    def instance_base(value):
+        shape = re.fullmatch(r'sdiv i32 (%\w+), 16', text(value))
+        shape = shape and re.fullmatch(r'extractvalue %dx.types.ResRet.i32 (%\w+), 0', text(shape[1]))
+        load = shape and re.fullmatch(_RAW, text(shape[1]))
+        return bool(load and buffer(load[1]) == 'Instances' and load[3] == '52')
+
+    loads = {value: load for value, row in definitions.items()
+             if (load := re.fullmatch(_RAW, row['text'])) and buffer(load[1]) == 'BindlessBuffer' and load[3] == '0'}
+    result = set()
+    for value, load in loads.items():
+        add = re.fullmatch(r'add nsw i32 (%\w+), (%\w+)', text(load[2]))
+        if add and any(mesh_row(a) and instance_base(b) for a, b in ((add[1], add[2]), (add[2], add[1]))):
+            result.add(value)
+
+    def from_mesh(value):
+        lane = re.fullmatch(r'extractvalue %dx.types.ResRet.i32 (%\w+), [0-3]', text(value))
+        if lane:
+            return lane[1] in result
+        pick = re.fullmatch(r'select i1 %\w+, i32 (%\w+), i32 (%\w+)', text(value))
+        return bool(pick and from_mesh(pick[1]) and from_mesh(pick[2]))
+
+    changed = bool(result)
+    while changed:
+        changed = False
+        for value, load in loads.items():
+            if value in result:
+                continue
+            add = re.fullmatch(r'(?:add(?: nuw)?(?: nsw)?|or) i32 (%\w+), \d+', text(load[2]))
+            base = re.fullmatch(r'lshr i32 (%\w+), 4', text(add[1] if add else load[2]))
+            if base and from_mesh(base[1]):
+                result.add(value)
+                changed = True
+    return result
+
+
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
 def material_reads(ir, *, include_static=False):
     definitions, uses, _ = parse(ir)
@@ -59,10 +114,11 @@ def material_reads(ir, *, include_static=False):
             handles[key] = 'raw' if name == 'BindlessBuffer' else 'instance'
         elif include_static and name == 'UserMaterial' and origin.get('binding', {}).get('resource_class') == 2:
             handles[key] = 'static'
+    mesh = _mesh_table_reads(definitions, origins)
     result = []
     for value, row in definitions.items():
         text = row['text']
-        if not any(op in text for op in ('@dx.op.cbufferLoad', '@dx.op.rawBufferLoad', '@dx.op.bufferLoad')):
+        if value in mesh or not any(op in text for op in ('@dx.op.cbufferLoad', '@dx.op.rawBufferLoad', '@dx.op.bufferLoad')):
             continue
         hm = re.search(r'%dx.types.Handle (%\w+)', text)
         if not hm or hm[1] not in handles:

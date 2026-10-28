@@ -6,6 +6,7 @@ import unittest
 
 from inspect_mmtr import inspect_data
 from mmtr_editor.hashes import xxh64
+from mmtr_editor.material_addresses import material_reads
 from mmtr_editor.mdf import MdfDocument, MdfError
 from mmtr_editor.model import Document, EditError
 from mmtr_editor.structure import document_structure, parse_structure
@@ -94,6 +95,55 @@ class Re4MmtrTests(unittest.TestCase):
         self.assertEqual(info['record_size'], 0x108)
         self.assertEqual([m['name'] for m in info['metadata']['cbuffers'][0]['members']], ['Value', 'Added'])
         self.assertEqual(document_structure(doc).diagnostics, ())
+
+
+# RE4 可见性缓冲变体的网格表读取（形态取自原版 789 个 Shader）；%redir 一行为普通材质读取作对照。
+def mesh_ir(element=52, buffer='Instances', mixed=False):
+    pick = '%x, i32 %other' if mixed else '%x, i32 %z'
+    return f'''; BindlessBuffer                    texture  struct         r/o      T0             t0     1
+; {buffer}                         texture  struct         r/o      T4             t1     1
+define void @main() {{
+  %bb = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 0, i32 0, i32 0, i1 false)
+  %inst = call %dx.types.Handle @dx.op.createHandle(i32 57, i8 0, i32 4, i32 1, i1 false)
+  %ir = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %inst, i32 %i, i32 {element}, i8 1, i32 4)
+  %ib = extractvalue %dx.types.ResRet.i32 %ir, 0
+  %base = sdiv i32 %ib, 16
+  %s16 = lshr i32 %packed, 16
+  %m = and i32 %s16, 255
+  %p1 = add nuw nsw i32 %m, 1
+  %row = lshr i32 %p1, 1
+  %addr = add nsw i32 %row, %base
+  %mesh = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %bb, i32 %addr, i32 0, i8 15, i32 4)
+  %x = extractvalue %dx.types.ResRet.i32 %mesh, 0
+  %z = extractvalue %dx.types.ResRet.i32 %mesh, 2
+  %ptr = select i1 %odd, i32 {pick}
+  %sub = lshr i32 %ptr, 4
+  %subrow = add nuw nsw i32 %sub, 2
+  %rec = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %bb, i32 %subrow, i32 0, i8 15, i32 4)
+  %rx = extractvalue %dx.types.ResRet.i32 %rec, 0
+  %mat = lshr i32 %redir, 4
+  %matrow = add i32 %mat, 3
+  %load = call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32(i32 139, %dx.types.Handle %bb, i32 %matrow, i32 0, i8 15, i32 4)
+  %field = extractvalue %dx.types.ResRet.i32 %load, 1
+  ret void
+}}
+'''
+
+
+class Re4MeshTableTests(unittest.TestCase):
+    def test_mesh_table_and_chained_reads_are_not_material_reads(self):
+        reads = material_reads(mesh_ir())
+        self.assertEqual([(r['ssa'], r['register']) for r in reads], [('%load', 3)])
+        self.assertEqual(reads[0]['extracts'], [{'ssa': '%field', 'lane': 1, 'offset': 52}])
+
+    def test_other_element_or_buffer_is_still_rejected(self):
+        for ir in (mesh_ir(element=48), mesh_ir(buffer='CulledMeshlet')):
+            with self.subTest(), self.assertRaisesRegex(ValueError, '未知材质表基址'):
+                material_reads(ir)
+
+    def test_chain_mixed_with_other_value_stays_a_material_read(self):
+        reads = material_reads(mesh_ir(mixed=True))
+        self.assertEqual(sorted(r['ssa'] for r in reads), ['%load', '%rec'])
 
 
 class Re4MdfTests(unittest.TestCase):
