@@ -1,6 +1,6 @@
 # RE4 支持
 
-2026-10-28。结论：RE4（BIOHAZARD RE:4）的 MMTR `.mmtr.221007879` 与 MDF `.mdf2.32` 可以打开、浏览、编辑 MDF、替换 Shader 并另存；原样另存逐字节一致。新增 UserMaterial 参数与 Texture2D 的状态见第四节。全部为 CPU 静态证据，未在游戏中测试。
+2026-10-28。结论：RE4（BIOHAZARD RE:4）的 MMTR `.mmtr.221007879` 与 MDF `.mdf2.32` 可以打开、浏览、编辑 MDF、新增 UserMaterial 参数、替换 Shader 并另存；原样另存逐字节一致。新增 Texture2D 仍被拒绝，见第四节。除第五节的一次游戏内测试外，均为 CPU 静态证据。
 
 ## 一、格式差异
 
@@ -68,7 +68,16 @@ RE4 的可见性缓冲与网格变体经 `Instances` 读取 BindlessBuffer 中�
 
 `add_texture` 被拒绝：「材质纹理表包含未支持的计算阶段或没有PS」。RE4 的预变换计算着色器（`PreTransform*VFXCS`）读取材质贴图 `Noise3D`、`Wind_MaskMap`，而接口扩展不处理计算阶段的资源表。这是现有功能的范围限制，与 RE4 格式无关；需要新贴图时复用模板中开关为 0 时不读取的槽。
 
-## 五、局限
+## 五、游戏内测试
 
-- 未在游戏中测试。RE4 运行时是否接受替换后的 Shader 块、是否另有缓存校验，没有证据。
+2026-10-28，RE4 Steam 版，玩家角色 Leon 槽位的自制 mod（31 个 mdf2、76 个材质，原模板均为 `Character_Detail_Expensive_8weight`）。
+
+- 候选模板：原生模板经 `add_parameter` 新增 float4 `LIL_TestTint`（偏移 608，Shader 不读取；迁移改动 465 个 Shader），导出后重新打开，再把 36 个输出 4 个渲染目标且读取材质数据的 PS 的 SV_Target1.rgb 乘以 (1, 0.25, 0.25)，以普通模式替换；验证通过后另存为新文件名。
+- MDF：各材质的 master 改指向候选模板，补上 `LIL_TestTint`；其余参数、纹理与 flags 不变。
+- 结果：材质整体偏红，贴图细节保留，没有消失、变黑或闪退。
+
+据此：RE4 运行时接受替换后的 Shader 块与扩展后的 UserMaterial 布局；SV_Target1.rgb 是底色，这组 36 个 PS 是该材质实际使用的 GBuffer 变体。只看了一次目测效果，没有核对哪些场景、哪些通道（阴影、前向、光追）用到了未修改的变体。
+
+## 六、局限
+
 - `smoke_workbench_mcp.py` 自 0.3.0 起未随工具数量更新（断言 20 个工具，现为 34 个），未用于本次验证。
