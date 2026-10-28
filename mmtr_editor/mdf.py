@@ -727,7 +727,7 @@ class MdfDocument:
         report["extra_mdf_textures"] = [x for x in report["textures"] if x["status"] == "not_in_mmtr_metadata"]
         report["missing_mdf_textures"] = [{"name": name} for name in sorted(srv_names - mdf_texture_names)]
         differences = [x for x in report['properties'] if x['status'] != 'match']
-        non_reserve = [x for x in differences if not (x['status'] == 'missing_in_mdf' and re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d+', x['name']))]
+        non_reserve = [x for x in differences if not (x['status'] == 'missing_in_mdf' and re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', x['name']))]
         review = non_reserve or report['extra_mdf_properties'] or report['extra_mdf_textures']
         report['status'] = 'review_required' if review else ('compatible_with_reserves' if differences else 'ok')
         return report

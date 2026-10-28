@@ -274,7 +274,7 @@ def current_layout(document, material, info=None):
         members = {m['name']: m for m in buffers[0]['members']}
         property_names = {p['name'] for p in material['properties']}
         missing = set(members)-property_names
-        if property_names-set(members) or any(not re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d+', name) for name in missing):
+        if property_names-set(members) or any(not re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', name) for name in missing):
             raise EditError('关联MDF参数与UserMaterial成员不一致，请先同步已有接口。')
         for prop in material['properties']:
             member = members[prop['name']]

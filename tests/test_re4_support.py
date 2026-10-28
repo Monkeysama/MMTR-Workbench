@@ -109,6 +109,18 @@ class Re4MdfTests(unittest.TestCase):
         with self.assertRaisesRegex(MdfError, 'MaterialShader/'):
             wilds.set_master(0, '_Chainsaw/MasterMaterial/test.mmtr')
 
+    def test_unsuffixed_reserve_member_is_tolerated_like_numbered_reserves(self):
+        # RE4 模板同时有 CAPCOM_MATERIAL_RESERVE 与 CAPCOM_MATERIAL_RESERVE0..2；原版 MDF 都不写这些保留项。
+        doc = MdfDocument(mdf_fixture(), Path('synthetic.mdf2.32'))
+        for reserve in ('CAPCOM_MATERIAL_RESERVE', 'CAPCOM_MATERIAL_RESERVE1'):
+            info = {'source': str(RE4_PATH), 'metadata': {'cbuffers': [{'name': 'UserMaterial', 'buffer_size': 16, 'members': [
+                {'name': 'Value', 'byte_offset': 0, 'byte_size': 4}, {'name': reserve, 'byte_offset': 4, 'byte_size': 4}]}],
+                'srvs': [{'name': 'BaseMap'}]}}
+            with self.subTest(reserve=reserve):
+                self.assertEqual(doc.binding_report(0, info)['status'], 'compatible_with_reserves')
+        info['metadata']['cbuffers'][0]['members'][1]['name'] = 'CAPCOM_MATERIAL_RESERVED'
+        self.assertEqual(doc.binding_report(0, info)['status'], 'review_required')
+
     def test_unregistered_mdf_version_is_rejected(self):
         with self.assertRaisesRegex(MdfError, '2.32'):
             MdfDocument(mdf_fixture(), Path('synthetic.mdf2.31'))
