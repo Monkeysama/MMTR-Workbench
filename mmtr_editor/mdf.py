@@ -550,8 +550,9 @@ class MdfDocument:
                     string_ptrs.setdefault(prop['name'], prop['_name_pointer'])
             for slot, tex in enumerate(material['textures']):
                 if not tex.get('_new'):
-                    string_ptrs.setdefault(tex['name'], tex['_name_pointer'])
-                    string_ptrs.setdefault(tex['path'], tex['_path_pointer'])
+                    # 同上：路径可能已被 set_texture 修改，键取原指针处的字符串。
+                    string_ptrs.setdefault(_string(self.original, tex['_name_pointer']), tex['_name_pointer'])
+                    string_ptrs.setdefault(_string(self.original, tex['_path_pointer']), tex['_path_pointer'])
 
         def align(value: int, boundary: int) -> int:
             return (value + boundary - 1) // boundary * boundary
