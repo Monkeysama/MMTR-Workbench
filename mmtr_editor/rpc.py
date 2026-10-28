@@ -8,7 +8,7 @@ import os
 import traceback
 
 from .model import Document, EditError, atomic_write
-from .mdf import MdfDocument, MdfError, master_matches
+from .mdf import MdfDocument, MdfError, master_matches, mdf_suffix_ok
 from .migration import build_migration_report
 from .dxc import reflection_differences
 from .dxc_process import compile_hlsl,disassemble_shader,DxcProcessError
@@ -350,8 +350,8 @@ class Service:
             return self.mdf_snapshot()
         if op == 'mdf_export':
             data, report = self.mdf_write_snapshot()
-            if not str(req['path']).lower().endswith('.mdf2.45'):
-                raise MdfError('导出路径必须以 .mdf2.45 结尾。')
+            if not mdf_suffix_ok(req['path'], self.mdf.version):
+                raise MdfError(f'导出路径必须以 .mdf2.{self.mdf.version} 结尾。')
             self.safe_write(req['path'], data)
             self.mdf.saved_sha256 = report['sha256']
             return report

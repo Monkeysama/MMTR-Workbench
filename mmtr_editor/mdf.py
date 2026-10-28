@@ -1,8 +1,8 @@
-"""Byte-preserving MDF 2.45 reader and MDF/MMTR binding diagnostics.
+"""Byte-preserving MDF 2.45 (MH Wilds) / 2.32 (RE4) reader and MDF/MMTR binding diagnostics.
 
 The Blender add-on supplied the format reference, but this module deliberately
 keeps the editor independent from Blender and does not implement a full
-rewriting exporter.  It reads the current MHWILDS layout without normalizing
+rewriting exporter.  It reads the MHWILDS and RE4 layouts without normalizing
 unknown bytes so reports can be tied to the exact source file.
 """
 from __future__ import annotations
@@ -18,6 +18,23 @@ from mmtr_editor.hashes import murmur3_x86_32
 
 class MdfError(ValueError):
     pass
+
+
+# MDF 版本 → (游戏, master 根目录)。2.32 与 2.45 的材质项（100 字节）、属性头与纹理头布局相同；
+# RE4 原版材质没有 MMTRS 表（指针为 0）。只登记有原版语料核对的版本。
+MDF_VERSIONS = {45: ('MHWilds', 'MaterialShader/'), 32: ('RE4', '_Chainsaw/MasterMaterial/')}
+
+
+def master_root_ok(path: str, version: int | None = None) -> bool:
+    """master 是否位于该版本（未给版本时为任一已登记版本）的引擎相对根目录下。"""
+    roots = [MDF_VERSIONS[version][1]] if version in MDF_VERSIONS else [root for _game, root in MDF_VERSIONS.values()]
+    return any(path.casefold().startswith(root.casefold()) for root in roots)
+
+
+def mdf_suffix_ok(path: str, version: int | None = None) -> bool:
+    """导出路径是否以该版本（未给版本时为任一已登记版本）的 .mdf2.N 结尾。"""
+    versions = [version] if version in MDF_VERSIONS else list(MDF_VERSIONS)
+    return any(str(path).casefold().endswith(f'.mdf2.{v}') for v in versions)
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -87,7 +104,7 @@ def _public_data(value: Any) -> Any:
 
 
 class MdfDocument:
-    """Parsed MDF 2.45 document.
+    """Parsed MDF 2.45 / 2.32 document.
 
     原始字节用于固定宽度编辑；发生参数或纹理槽增删时，只重建被修改
     材质的尾部表和数据块，并把新块追加到文件末尾。这样可以保留其它
@@ -104,8 +121,9 @@ class MdfDocument:
         self.original = bytes(data)
         self.source = Path(source).resolve() if source else None
         self.version = int(self.source.suffix[1:]) if self.source and self.source.suffix[1:].isdigit() else 45
-        if self.version != 45:
-            raise MdfError(f"当前联动适配器只接受 MHWILDS MDF 2.45，收到 .{self.version}")
+        if self.version not in MDF_VERSIONS:
+            raise MdfError(f"当前联动适配器只接受 MHWILDS MDF 2.45 与 RE4 MDF 2.32，收到 .{self.version}")
+        self.game, self.master_root = MDF_VERSIONS[self.version]
         self.material_count = _u16(data, 6)
         if 16 + self.material_count * self.MATERIAL_SIZE > len(data):
             raise MdfError("MDF material table exceeds file")
@@ -231,6 +249,7 @@ class MdfDocument:
             "size": len(self.original),
             "sha256": self.sha256,
             "version": self.version,
+            "game": self.game,
             "material_count": len(self.materials),
             "materials": [
                 {k: m[k] for k in ("index", "name", "master", "shader_type", "flags", "flags_hex", "property_count", "texture_count")}
@@ -337,9 +356,9 @@ class MdfDocument:
         path = path.strip().replace('\\', '/')
         if (any(ord(c) < 32 for c in path) or ':' in path
                 or any(part in ('', '.', '..') for part in path.split('/'))
-                or not path.casefold().startswith('materialshader/')
+                or not master_root_ok(path, self.version)
                 or not path.casefold().endswith('.mmtr')):
-            raise MdfError('master 必须是 MaterialShader/ 下以 .mmtr 结尾的相对路径，不带版本后缀或目录跳转。')
+            raise MdfError(f'master 必须是 {self.master_root} 下以 .mmtr 结尾的相对路径，不带版本后缀或目录跳转。')
         try:
             encoded = path.encode('utf-16-le')
         except UnicodeError as exc:

@@ -11,18 +11,22 @@ from pathlib import Path
 import re
 
 from .material_plan import MaterialEditPlan, dll_identity
-from .mdf import MdfDocument, _public_data, master_matches
+from .mdf import MDF_VERSIONS, MdfDocument, _public_data, master_matches, master_root_ok, mdf_suffix_ok
 from .model import Document, EditError, atomic_write
 
 
-def validate_variant_master(master):
-    """仅允许确定的引擎相对 MMTR 名称；不接受绝对路径、版本后缀或目录跳转。"""
+def validate_variant_master(master, mdf_version=None):
+    """仅允许确定的引擎相对 MMTR 名称；不接受绝对路径、版本后缀或目录跳转。
+
+    给出 MDF 版本时只接受该游戏的 master 根目录；未给出时接受任一已登记游戏的根目录。
+    """
     if (not isinstance(master, str) or len(master) > 32767 or '\\' in master
             or any(ord(c) < 32 for c in master) or ':' in master
-            or not master.casefold().startswith('materialshader/')
+            or not master_root_ok(master, mdf_version)
             or not master.casefold().endswith('.mmtr')
             or any(part in ('', '.', '..') for part in master.split('/'))):
-        raise EditError('变体 master 必须是 MaterialShader/ 下的 .mmtr 相对路径，不带版本或目录跳转。')
+        roots = MDF_VERSIONS[mdf_version][1] if mdf_version in MDF_VERSIONS else '/'.join(r for _g, r in MDF_VERSIONS.values())
+        raise EditError(f'变体 master 必须是 {roots} 下的 .mmtr 相对路径，不带版本或目录跳转。')
     try:
         if len(master.encode('utf-16-le')) > 65534:
             raise ValueError('too long')
@@ -75,14 +79,14 @@ def _fingerprint(path):
 
 
 def _destinations(service, mmtr_path, mdf_path, master, *, overwrite):
-    validate_variant_master(master)
+    validate_variant_master(master, service.mdf.version)
     paths = [service.check_write_target(path) for path in (mmtr_path, mdf_path)]
     version = re.search(r'\.mmtr(\.\d+)$', str(service.doc.source), re.I)
     if (version is None or not paths[0].as_posix().casefold().endswith((master+version[1]).casefold())
             or not master_matches(master, str(paths[0]))):
         raise EditError('MMTR 输出位置必须保留 master 相对目录和当前资源版本后缀。')
-    if not str(paths[1]).casefold().endswith('.mdf2.45'):
-        raise EditError('MDF 输出必须以 .mdf2.45 结尾。')
+    if not mdf_suffix_ok(paths[1], service.mdf.version):
+        raise EditError(f'MDF 输出必须以 .mdf2.{service.mdf.version} 结尾。')
     if paths[0] == paths[1] or (paths[0].exists() and paths[1].exists() and paths[0].samefile(paths[1])):
         raise EditError('变体 MMTR/MDF 不能指向相同文件或硬链接。')
     result = []

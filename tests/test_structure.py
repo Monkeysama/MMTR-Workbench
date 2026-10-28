@@ -14,9 +14,10 @@ PATH = Path('MaterialShader/Variation/synthetic.mmtr.240906211')
 
 
 # 各组共享同一 PS/绑定/状态，测试共享者闭包及非零未知字节的保留。
-def fixture(group_count=4, programs_per_group=1):
+# record_size 0x108 生成 RE4 记录：0xFF 之前的字段与荒野相同，没有荒野 0x100..0x107 的 8 字节。
+def fixture(group_count=4, programs_per_group=1, record_size=0x110):
     record_count = group_count * programs_per_group
-    data = bytearray(16+record_count*0x110)
+    data = bytearray(16+record_count*record_size)
     data[:4] = b'SDF\0'
     struct.pack_into('<HH', data, 4, group_count, programs_per_group)
 
@@ -52,7 +53,7 @@ def fixture(group_count=4, programs_per_group=1):
     data.extend(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)))
     struct.pack_into('<Q', data, 8, start)
     for i in range(record_count):
-        base = 16+i*0x110
+        base = 16+i*record_size
         for field, pointer in [(0, names[i % programs_per_group]), (0x30, start), (0x40, layout), (0x48, raster), (0x50, blend),
                                (0x58, depth), (0x68, cb), (0x70, metadata_cb), (0x88, srv), (0x90, metadata_srv)]:
             struct.pack_into('<Q', data, base+field, pointer)
@@ -60,7 +61,8 @@ def fixture(group_count=4, programs_per_group=1):
         struct.pack_into('<I', data, base+0xD4, 2)
         data[base+0xDC] = data[base+0xE8] = 1
         data[base+0xF6] = data[base+0xFC] = 1
-        data[base+0x100] = 99
+        if record_size == 0x110:
+            data[base+0x100] = 99
     return bytes(data)
 
 

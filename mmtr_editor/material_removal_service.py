@@ -53,7 +53,7 @@ def prepare_removal_preview(service, dll, actions, material_index, revision, *, 
         raise EditError('所选 MDF 材质未关联当前 MMTR。')
     if variant_master is not None:
         from .material_variant import validate_variant_master
-        validate_variant_master(variant_master)
+        validate_variant_master(variant_master, mdf.version)
         if any(master_matches(variant_master, m['master']) for m in mdf.materials):
             raise EditError('独立变体不能复用已知材质 master。')
         linked = [m for m in linked if m['index'] == index]

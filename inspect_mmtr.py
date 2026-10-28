@@ -1,4 +1,4 @@
-"""Read-only SDF/MMTR inspection for the supplied MH Wilds shader family.
+"""Read-only SDF/MMTR inspection for the MH Wilds and RE4 shader families (see FORMATS).
 
 The SDF record layout is inferred from shipped files, not an official schema.
 DXBC/DXIL structures are decoded independently and bounds checked.
@@ -20,6 +20,9 @@ import uuid
 STAGES = {0: "ps", 1: "vs", 2: "gs", 3: "hs", 4: "ds", 5: "cs", 6: "lib", 13: "ms", 14: "as"}
 RECORD_START = 0x10
 RECORD_SIZE = 0x110
+# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107
+# 多出 8 字节（全部原版语料为零），其后的 compute 线程组与拓扑随之后移。
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5)), 221007879: ("RE4", 0x108, (3,))}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -100,8 +103,34 @@ def inspect(path):
     return inspect_data(data, path)
 
 
+def resource_version(path):
+    match = re.search(r"\.mmtr\.(\d+)$", str(path), re.I)
+    return int(match[1]) if match else None
+
+
 def inspect_data(data, path):
-    """Inspect immutable in-memory bytes; also used to verify rebuilt editor output."""
+    """Inspect immutable in-memory bytes; also used to verify rebuilt editor output.
+
+    记录长度按文件名的资源版本选择；无后缀或未登记版本时，只接受恰好一种已知长度能完整解析的文件。
+    """
+    version = resource_version(path)
+    if version in FORMATS:
+        game, record_size, _groups = FORMATS[version]
+        return _inspect_layout(data, path, game, record_size, version)
+    results, errors = [], []
+    for game, record_size, _groups in FORMATS.values():
+        try:
+            results.append(_inspect_layout(data, path, game, record_size, version))
+        except ValueError as exc:
+            errors.append(exc)
+    if len(results) == 1:
+        return results[0]
+    if not results:
+        raise errors[0]
+    raise ValueError("SDF record size is ambiguous; add the resource version suffix to the file name")
+
+
+def _inspect_layout(data, path, game, record_size, version):
     if data[:4] != b"SDF\0":
         raise ValueError("Not an SDF/MMTR file")
     shader_start = u64(data, 8)
@@ -156,11 +185,11 @@ def inspect_data(data, path):
     # 记录表由文件头的组数和组内记录数界定；其后的区域是 metadata/字符串，不能继续按记录扫描。
     record_limit = (declared_record_count
                     if declared_record_count
-                    and RECORD_START + declared_record_count * RECORD_SIZE <= shader_start
+                    and RECORD_START + declared_record_count * record_size <= shader_start
                     else None)
     records = []
     offset = RECORD_START
-    while (offset + RECORD_SIZE <= shader_start
+    while (offset + record_size <= shader_start
            and (record_limit is None or len(records) < record_limit)):
         name_pointer = u64(data, offset)
         name = cstring(data, name_pointer, shader_start)
@@ -193,9 +222,9 @@ def inspect_data(data, path):
             "metadata_tables": tables,
             "per_stage_counts_raw": {kind: list(data[offset + pos:offset + pos + 6])
                                      for kind, pos in [("cbuffers", 0xD8), ("samplers", 0xDE), ("srvs", 0xE4), ("uavs", 0xEA)]},
-            "raw_u32": [u32(data, offset + i) for i in range(0, RECORD_SIZE, 4)],
+            "raw_u32": [u32(data, offset + i) for i in range(0, record_size, 4)],
         })
-        offset += RECORD_SIZE
+        offset += record_size
     if record_limit is not None and len(records) != record_limit:
         raise ValueError("Header-declared record table is truncated")
     names = collections.defaultdict(list)
@@ -222,7 +251,8 @@ def inspect_data(data, path):
         "source": str(path.resolve()), "size": len(data), "sha256": sha256(data),
         "magic": "SDF\\0", "header_u32_04": u32(data, 4),
         "header_u16_04": header04, "header_u16_06": header06, "candidate_groups": groups,
-        "shader_start": shader_start, "record_start": RECORD_START, "record_size": RECORD_SIZE,
+        "game": game, "resource_version": version,
+        "shader_start": shader_start, "record_start": RECORD_START, "record_size": record_size,
         "record_end": offset, "record_count": len(records), "shader_count": len(shaders),
         "stages": dict(collections.Counter(s["stage"] for s in shaders)),
         "shader_models": dict(collections.Counter(s["shader_model"] for s in shaders)),

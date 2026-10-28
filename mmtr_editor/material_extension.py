@@ -544,7 +544,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                 raise EditError('原SRV绑定映射被改变。')
         else:
             # 除 Shader 引用/长度和统一 CB 尺寸外，未追加固定表的记录及其资源表逐字保留。
-            for start, end in ((0x40, 0xb8), (0xd4, 0x110)):
+            for start, end in ((0x40, 0xb8), (0xd4, info['record_size'])):
                 if rebuilt[base+start:base+end] != original_data[base+start:base+end]:
                     raise EditError('未选固定纹理表的记录结构被改变。')
     progress('validating', 0, 1)

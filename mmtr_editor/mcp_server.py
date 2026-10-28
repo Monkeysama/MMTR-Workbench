@@ -15,7 +15,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from . import __version__
-from .mdf import MdfDocument, _public_data, master_matches
+from .mdf import MdfDocument, _public_data, master_matches, mdf_suffix_ok
 from .model import Document, EditError, atomic_write
 from .rpc import Service
 
@@ -619,7 +619,7 @@ def create_server(session=None):
 
     @tool(write=True, transaction=True)
     def workbench_set_master(path: str, material_index: Index | None = None) -> dict[str, Any]:
-        """将指定MDF材质改用另一个MMTR，例如MaterialShader/Variation/test.mmtr（不带版本后缀）。
+        """将指定MDF材质改用另一个MMTR，例如MaterialShader/Variation/test.mmtr 或 RE4 的 _Chainsaw/MasterMaterial/Master/test.mmtr（不带版本后缀）。
         只改所选材质，不改其它共享master的材质；不复制MMTR或证明新Shader兼容。
         导出MMTR/MDF后重新打开匹配路径可检查关联；路径错误或重解析失败整体回滚。
         """
@@ -670,8 +670,8 @@ def create_server(session=None):
             if mmtr_path:
                 payloads.append((mmtr_path, data))
         if mdf_path or (report_path and service.mdf):
-            if mdf_path and not mdf_path.lower().endswith('.mdf2.45'):
-                raise EditError('MDF 路径必须以 .mdf2.45 结尾。')
+            if mdf_path and not mdf_suffix_ok(mdf_path, service.mdf.version if service.mdf else None):
+                raise EditError(f'MDF 路径必须以 .mdf2.{service.mdf.version if service.mdf else "N"} 结尾。')
             data, report['mdf'] = service.mdf_write_snapshot()
             if mdf_path:
                 payloads.append((mdf_path, data))
