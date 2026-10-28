@@ -318,6 +318,20 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.revision, revision)
         self.assertEqual(self.source.read_bytes(), fixture())
 
+    async def test_mdf_only_transaction_restores_link_state_after_batch_failure(self):
+        service = self.state.service
+        service.mdf_selected = 1
+        service.mdf_link_report = {'sentinel': ['linked']}
+        service.mdf_migration = {'sentinel': ['migration']}
+        before = (service.mdf.build()[0], service.mdf_selected, service.mdf_link_doc,
+                  service.mdf_link_report, service.mdf_migration)
+        with patch.object(service.mdf, 'set_property', side_effect=RuntimeError('injected MDF failure')):
+            with self.assertRaisesRegex(ToolError, 'injected MDF failure'):
+                await self.call('edit_mdf', actions=[
+                    {'action': 'set_property', 'material_index': 0, 'name': 'Value', 'values': [0.75]}])
+        self.assertEqual((service.mdf.build()[0], service.mdf_selected, service.mdf_link_doc,
+                          service.mdf_link_report, service.mdf_migration), before)
+
     async def test_batch_schema_rejects_unknown_fields_and_nonfinite_values(self):
         for extra in ({'values': [float('nan')]}, {'op': 'export'}):
             action = {'action': 'set_property', 'material_index': 0, 'name': 'Value', 'values': [1]}
@@ -394,8 +408,33 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.service.mdf.build()[0], fixture())
         self.assertTrue((await self.call('status'))['mdf']['unsaved'])
 
+    async def test_read_shader_cache_hits_pages_and_invalidates_on_dll_change(self):
+        payload = b'DXBC synthetic shader payload'
+        dll = self.root/'read-shader.dll'
+        dll.write_bytes(b'first identity')
+        self.state.dll = str(dll)
+        self.state.service.doc = SimpleNamespace(shader_bytes=lambda index: payload,
+            source=self.root/'synthetic.mmtr')
+        calls = []
+
+        def call(op, **kwargs):
+            calls.append((op, kwargs))
+            return {'ir': 'line one\nline two\nline three', 'entry': 'main', 'profile': 'ps_6_6'}
+
+        with patch.object(self.state, 'call', side_effect=call):
+            first = await self.call('read_shader', index=0, offset_line=0, limit=2)
+            second = await self.call('read_shader', index=0, offset_line=1, limit=2)
+            self.assertEqual((first['text'], second['text']), ('line one\nline two', 'line two\nline three'))
+            self.assertEqual(len(calls), 1)
+            dll.write_bytes(b'second identity')
+            await self.call('read_shader', index=0, offset_line=0, limit=1)
+            self.assertEqual(len(calls), 2)
+
     async def test_native_compilation_failure_clears_stale_cache(self):
+        dll = self.root/'compile.dll'
+        dll.write_bytes(b'not loaded; identity only')
         self.state.service.compiled = b'old result'
+        self.state.dll = str(dll)
         with patch('mmtr_editor.rpc.compile_hlsl', side_effect=ValueError('compiler failed')):
             with self.assertRaisesRegex(ToolError, 'compiler failed'):
                 await self.call('compile', source='bad', entry='main', profile='ps_6_6')

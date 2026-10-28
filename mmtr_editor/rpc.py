@@ -14,12 +14,14 @@ from .dxc import reflection_differences
 from .dxc_process import compile_hlsl,disassemble_shader,DxcProcessError
 from .reconstruct import reconstruct_hlsl
 from . import __version__
+from .bounded_cache import ByteLRU
 
 
 class Service:
     def __init__(self):
         self.doc = None
         self.compiled = None
+        self.compile_cache = ByteLRU(8, 16 * 1024 * 1024)
         self.mdf = None
         self.mdf_selected = None
         self.mdf_link_report = None
@@ -169,7 +171,21 @@ class Service:
             return self.snapshot()
         if op == 'compile':
             self.compiled = None
-            payload,warnings,ir=compile_hlsl(req['dll'],req['source'],req['entry'],req['profile'])
+            from .material_plan import dll_identity
+            import hashlib
+            # 首编仍在隔离子进程；复用键包含完整源码、编译参数及 DLL 内容身份。
+            identity = dll_identity(req['dll'])
+            key = (str(Path(req['dll']).resolve()), identity,
+                   hashlib.sha256(req['source'].encode('utf-8')).hexdigest(), req['entry'], req['profile'])
+            result = self.compile_cache.get(key)
+            if result is None:
+                result = compile_hlsl(req['dll'],req['source'],req['entry'],req['profile'])
+                if dll_identity(req['dll']) != identity:
+                    raise EditError('编译期间 DXC 内容已改变，请重新编译。')
+                self.compile_cache.put(key, result, sum(sys.getsizeof(x) for x in (*key, *result)) + 512)
+            elif dll_identity(req['dll']) != identity:
+                raise EditError('编译期间 DXC 内容已改变，请重新编译。')
+            payload,warnings,ir=result
             self.compiled = payload
             return {'size':len(payload),'warnings':warnings,'ir':ir}
         if op == 'export_compiled':

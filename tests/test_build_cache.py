@@ -6,7 +6,40 @@ import unittest
 import tempfile
 from unittest.mock import Mock, patch
 
+from mmtr_editor.bounded_cache import ByteLRU
 from mmtr_editor.model import Document
+
+
+class ByteLRUTests(unittest.TestCase):
+    def test_tracks_byte_and_entry_limits_with_lru_order(self):
+        cache = ByteLRU(2, 8)
+        cache.put('a', 'A', 4)
+        cache.put('b', 'B', 4)
+        self.assertEqual(cache.get('a'), 'A')
+        cache.put('c', 'C', 4)
+        self.assertIsNone(cache.get('b'))
+        self.assertEqual((cache.get('a'), cache.get('c')), ('A', 'C'))
+        self.assertEqual((len(cache), cache.byte_size), (2, 8))
+
+    def test_replacement_and_oversized_entries_do_not_retain_stale_bytes(self):
+        cache = ByteLRU(2, 8)
+        cache.put('a', 'A', 6)
+        cache.put('a', 'AA', 3)
+        self.assertEqual(cache.byte_size, 3)
+        cache.put('too-large', 'B', 9)
+        self.assertIsNone(cache.get('too-large'))
+        self.assertEqual((len(cache), cache.byte_size), (1, 3))
+
+    def test_deepcopy_has_independent_eviction_state(self):
+        cache = ByteLRU(2, 8)
+        cache.put('a', 'A', 4)
+        cache.put('b', 'B', 4)
+        copied = copy.deepcopy(cache)
+        copied.get('a')
+        copied.put('c', 'C', 4)
+        self.assertIsNone(copied.get('b'))
+        self.assertEqual(cache.get('b'), 'B')
+        self.assertEqual((len(cache), len(copied)), (2, 2))
 
 
 # 绕过文件读取只测试缓存边界；真实重建字节在本地MCP语料验收中独立对照。
@@ -21,6 +54,46 @@ def document():
     doc._build_uncached = Mock(side_effect=lambda: (b'candidate', {'metadata_edits': copy.deepcopy(doc.metadata_edits)},
                                                    {'metadata': copy.deepcopy(doc.metadata_edits)}))
     return doc
+
+
+class CompileCacheTests(unittest.TestCase):
+    def test_compile_cache_hits_only_until_dxc_content_changes(self):
+        from mmtr_editor.rpc import Service
+        with tempfile.TemporaryDirectory() as folder:
+            dll = Path(folder) / 'dxcompiler.dll'
+            dll.write_bytes(b'first identity')
+            service = Service()
+            request = {'op': 'compile', 'dll': str(dll), 'source': 'float4 main() : SV_Target { return 0; }',
+                       'entry': 'main', 'profile': 'ps_6_6'}
+            with patch('mmtr_editor.rpc.compile_hlsl', return_value=(b'payload', [], 'ir')) as compiler:
+                service.handle(request)
+                service.handle(request)
+                self.assertEqual(compiler.call_count, 1)
+                dll.write_bytes(b'second identity')
+                service.handle(request)
+                self.assertEqual(compiler.call_count, 2)
+                source_hash = hashlib.sha256(request['source'].encode()).hexdigest()
+                self.assertEqual(service.compile_cache.get((
+                    str(dll.resolve()), hashlib.sha256(b'second identity').hexdigest(),
+                    source_hash, 'main', 'ps_6_6')), (b'payload', [], 'ir'))
+
+    def test_compile_identity_change_discards_candidate_and_cache(self):
+        from mmtr_editor.rpc import Service
+        with tempfile.TemporaryDirectory() as folder:
+            dll = Path(folder) / 'dxcompiler.dll'
+            dll.write_bytes(b'first identity')
+            service = Service()
+
+            def compile_and_replace(*args):
+                dll.write_bytes(b'second identity')
+                return b'payload', [], 'ir'
+
+            with patch('mmtr_editor.rpc.compile_hlsl', side_effect=compile_and_replace):
+                with self.assertRaisesRegex(Exception, 'DXC 内容已改变'):
+                    service.handle({'op': 'compile', 'dll': str(dll), 'source': 'bad',
+                                    'entry': 'main', 'profile': 'ps_6_6'})
+            self.assertIsNone(service.compiled)
+            self.assertEqual(len(service.compile_cache), 0)
 
 
 class BuildCacheTests(unittest.TestCase):

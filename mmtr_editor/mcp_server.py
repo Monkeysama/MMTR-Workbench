@@ -19,6 +19,7 @@ from .hashes import XXH64_BACKEND
 from .mdf import MdfDocument, _public_data, master_matches
 from .model import Document, EditError, atomic_write
 from .rpc import Service
+from .bounded_cache import ByteLRU
 
 Index = Annotated[int, Field(ge=0)]
 Limit = Annotated[int, Field(ge=1, le=100)]
@@ -136,7 +137,7 @@ class WorkbenchSession:
         self.dll = self.service.handle({'op': 'ping'})['dxc']
         self.revision = 0
         self.saved_mmtr = None
-        self.text_cache = {}
+        self.text_cache = ByteLRU(8, 16 * 1024 * 1024)
         self.snapshot_cache = None
         # 读取统计按 MMTR/MDF/DXC 当前内容缓存一份，不能把原路径被替换的 DLL 当成同一个输入。
         self.usage_cache = None
@@ -145,7 +146,7 @@ class WorkbenchSession:
 
     def invalidate(self):
         self.snapshot_cache = None
-        self.text_cache.clear()
+        # 文本按实际载荷／格式／DLL 内容寻址；MDF 路径与未应用编译不改变键。
         self.usage_cache = None
 
     def close(self):
@@ -217,7 +218,12 @@ def create_server(session=None):
             @wraps(function)
             def invoke(*args, **kwargs):
                 with nullcontext() if job else state.lock:
-                    backup = deepcopy(state.service) if transaction else None
+                    backup = deepcopy(state.service) if transaction is True else None
+                    mdf_backup = None
+                    if transaction == 'mdf':
+                        service = state.service
+                        mdf_backup = (deepcopy(service.mdf), service.mdf_selected, service.mdf_link_doc,
+                                      service.mdf_link_report, service.mdf_migration)
                     saved = state.saved_mmtr
                     try:
                         result = function(*args, **kwargs)
@@ -233,6 +239,10 @@ def create_server(session=None):
                         if backup is not None:
                             state.service = backup
                             state.saved_mmtr = saved
+                        if mdf_backup is not None:
+                            service = state.service
+                            (service.mdf, service.mdf_selected, service.mdf_link_doc,
+                             service.mdf_link_report, service.mdf_migration) = mdf_backup
                         if not job:
                             state.invalidate()
                         raise ToolError(str(exc)) from exc
@@ -501,12 +511,21 @@ def create_server(session=None):
         """分页读取 DXIL 或受限可编译 HLSL；offset_line 从0开始，重建不支持的程序会明确报错。"""
         doc = state.require_doc()
         payload = doc.shader_bytes(index)
-        key = (hashlib.sha256(payload).hexdigest(), format, state.dll)
-        if key not in state.text_cache:
+        from .material_plan import dll_identity
+        identity = dll_identity(state.dll)
+        key = (hashlib.sha256(payload).hexdigest(), format, str(Path(state.dll).resolve()), identity)
+        cached = state.text_cache.get(key)
+        if cached is None:
             result = state.call('disassemble' if format == 'dxil' else 'reconstruct', index=index)
             text = result['ir' if format == 'dxil' else 'source']
-            state.text_cache = {key: (text.splitlines(), {k: result[k] for k in ('entry', 'profile') if k in result})}
-        lines, extra = state.text_cache[key]
+            if dll_identity(state.dll) != identity:
+                raise EditError('读取期间 DXC 内容已改变，请重新读取。')
+            lines = tuple(text.splitlines())
+            cached = (lines, {k: result[k] for k in ('entry', 'profile') if k in result})
+            state.text_cache.put(key, cached, sys.getsizeof(lines) + sum(map(sys.getsizeof, lines)) + 2048)
+        elif dll_identity(state.dll) != identity:
+            raise EditError('读取期间 DXC 内容已改变，请重新读取。')
+        lines, extra = cached
         end = offset_line + limit
         return {'index': index, 'format': format, 'shader_sha256': key[0], **extra,
                 'total_lines': len(lines), 'offset_line': offset_line,
@@ -619,7 +638,7 @@ def create_server(session=None):
         return {'name': name, 'material_index': index, 'mdf_synced': sync_mdf,
                 'interface_sync': page_report(result['interface_sync'])}
 
-    @tool(write=True, transaction=True)
+    @tool(write=True, transaction='mdf')
     def workbench_set_master(path: str, material_index: Index | None = None) -> dict[str, Any]:
         """将指定MDF材质改用另一个MMTR，例如MaterialShader/Variation/test.mmtr（不带版本后缀）。
         只改所选材质，不改其它共享master的材质；不复制MMTR或证明新Shader兼容。
@@ -633,7 +652,7 @@ def create_server(session=None):
         return {'material_index': index, 'old_master': old, 'master': master,
                 'mmtr_linked': bool(state.service.doc and master_matches(master, str(state.service.doc.source)))}
 
-    @tool(write=True, transaction=True)
+    @tool(write=True, transaction='mdf')
     def workbench_edit_mdf(actions: Annotated[list[Action], Field(min_length=1, max_length=100)]) -> dict[str, Any]:
         """批量编辑 MDF 参数、分量、贴图、设置或删除槽位；整批失败全部回滚。
         add_* 只使用当前 MMTR 现有接口；新增真正接口应先调用 add_parameter/add_texture。
