@@ -14,7 +14,7 @@ from inspect_mmtr import decode_dxbc, inspect_data, reflection
 from mmtr_editor.hashes import murmur3_x86_32
 from .material_addresses import MaterialTailLayout, material_reads, relocate_material_reads
 from .model import Document, EditError, interface_chunks
-from .dxil_sources import parse, handle_sources
+from .dxil_sources import ensure_graph, handle_sources, parse
 from .material_textures import native_texture_reads
 
 
@@ -404,8 +404,9 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             before = reflection(ir)
             reflections[index] = hashlib.sha256(original).digest(), before
             has_cb = bool(parameters) and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
-            reads = material_reads(ir)
-            proofs = native_texture_reads(ir, old, reads, before) if has_texture else []
+            graph = ensure_graph(ir)
+            reads = material_reads(ir, graph=graph)
+            proofs = native_texture_reads(ir, old, reads, before, graph=graph) if has_texture else []
             if proofs:
                 native_proofs[index] = proofs
             has_texture = index in fixed_candidates and not proofs
@@ -418,9 +419,14 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                                 if has_cb or has_texture else (ir, None))
             tick = time.perf_counter()
             try:
+                # 声明补丁会生成新文本；只有文本未变才能复用迁移前的分析图。
+                edited_graph = graph if edited == ir else ensure_graph(edited)
                 edited, ordinary_reads, guards = relocate_material_markers(
-                    edited, old, new, components, added_components, reads)
-                edited, relocation = relocate_material_reads(edited, old, new, reads=ordinary_reads)
+                    edited, old, new, components, added_components, reads, graph=edited_graph)
+                # 标记迁移也可能改变文本，迁移读取时只复用仍与文本一致的分析图。
+                relocation_graph = edited_graph if not guards else ensure_graph(edited)
+                edited, relocation = relocate_material_reads(
+                    edited, old, new, reads=ordinary_reads, graph=relocation_graph)
             except ValueError as exc:
                 raise EditError(f'Shader #{index} 材质地址迁移失败：{exc}') from exc
             counters['migration_calls'] += 1
@@ -441,11 +447,12 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             if bodies(actual) != bodies(edited) or interface_chunks(original) != interface_chunks(payload):
                 raise EditError(f'Shader #{index} 的原计算/签名出现意外变化。')
             previous_reads = {ex['ssa']: ex['offset'] for r in ordinary_reads if r['kind'] != 'instance' for ex in r['extracts']}
-            compiled_reads = material_reads(actual)
-            if proofs and native_texture_reads(actual, new, compiled_reads, after) != proofs:
+            actual_graph = ensure_graph(actual)
+            compiled_reads = material_reads(actual, graph=actual_graph)
+            if proofs and native_texture_reads(actual, new, compiled_reads, after, graph=actual_graph) != proofs:
                 raise EditError(f'Shader #{index} 的原生动态纹理槽身份发生变化。')
             compiled_ordinary, compiled_guards = material_marker_reads(
-                actual, new, components+added_components, compiled_reads)
+                actual, new, components+added_components, compiled_reads, graph=actual_graph)
             if [(g['extract'], g['comparison']) for g in compiled_guards] != [(g['extract'], g['comparison']) for g in guards]:
                 raise EditError(f'Shader #{index} 编译后材质布局标记不一致。')
             actual_reads = {ex['ssa']: ex['offset'] for r in compiled_ordinary if r['kind'] != 'instance' for ex in r['extracts']}

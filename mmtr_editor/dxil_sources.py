@@ -1,10 +1,20 @@
 """单线程解析DXIL定义/使用及资源来源；只读文本，不持有编译器或GPU资源。"""
 import collections
+from dataclasses import dataclass
 import re
 
 SSA = r"%[\w.]+"
 _SSA_RE = re.compile(SSA)
 _DEFINITION_RE = re.compile(r'(%[\w.]+) = (.*)')
+
+
+@dataclass(frozen=True)
+class ParsedIr:
+    """同一 IR 文本的只读分析图；调用方只读，不得原地修改节点或边。"""
+    text: str
+    definitions: dict
+    uses: dict
+    statements: list
 
 
 # 收集函数内SSA定义及消费者，供材质地址迁移拒绝未知使用形式。
@@ -25,6 +35,20 @@ def parse(ir):
             uses[operand].append(row)
     return defs, uses, statements
 
+
+# 为同一次扩展调用建立精确文本对应的分析图，避免多个只读消费者重复分词。
+def parse_graph(ir):
+    definitions, uses, statements = parse(ir)
+    return ParsedIr(ir, definitions, uses, statements)
+
+
+# 只在文本对象确实是同一份 IR 时复用图；错误图不能被静默用于不同文本。
+def ensure_graph(ir, graph=None):
+    if graph is None:
+        return parse_graph(ir)
+    if not isinstance(graph, ParsedIr) or graph.text != ir:
+        raise ValueError('IR 分析图与当前文本不一致。')
+    return graph
 
 
 # 从反射绑定和句柄构造追溯资源身份，注解继承同一来源。

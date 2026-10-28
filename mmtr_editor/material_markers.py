@@ -4,7 +4,7 @@
 """
 import re
 
-from .dxil_sources import parse
+from .dxil_sources import ensure_graph
 from .model import EditError
 
 
@@ -20,9 +20,9 @@ def marker_offset(layout):
     return (layout.parameter_bytes + 4*len(layout.texture_names+layout.gpbf_names) + 15) & ~15
 
 
-def material_marker_reads(ir, layout, components, reads):
+def material_marker_reads(ir, layout, components, reads, *, graph=None):
     """分离已证明的标记读取；其余越界读取继续由普通迁移拒绝。"""
-    _, uses, _ = parse(ir)
+    uses = ensure_graph(ir, graph).uses
     ordinary, guards = [], []
     end = layout.parameter_bytes + 4*len(layout.texture_names+layout.gpbf_names)
     for read in reads:
@@ -44,9 +44,9 @@ def material_marker_reads(ir, layout, components, reads):
     return ordinary, guards
 
 
-def relocate_material_markers(ir, old, new, components, added_components, reads):
+def relocate_material_markers(ir, old, new, components, added_components, reads, *, graph=None):
     """保留标记检查；独立新地址避免改变共享地址 SSA 的其它消费者。"""
-    ordinary, guards = material_marker_reads(ir, old, components, reads)
+    ordinary, guards = material_marker_reads(ir, old, components, reads, graph=graph)
     if not guards:
         return ir, ordinary, guards
     old_offset, new_offset = marker_offset(old), marker_offset(new)

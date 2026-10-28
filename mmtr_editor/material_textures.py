@@ -5,13 +5,13 @@
 """
 import re
 
-from .dxil_sources import handle_sources, parse
+from .dxil_sources import ensure_graph, handle_sources
 from .model import EditError
 
 
 # 返回原有消费者与逻辑纹理身份，迁移后须按新布局得到同一组证明。
-def native_texture_reads(ir, layout, reads, reflected):
-    definitions, _, _ = parse(ir)
+def native_texture_reads(ir, layout, reads, reflected, *, graph=None):
+    definitions = ensure_graph(ir, graph).definitions
     origins = handle_sources(ir, definitions)
     extracts = {ex['ssa']: ex['offset'] for read in reads if read['kind'] in ('raw', 'cb')
                 for ex in read['extracts']}

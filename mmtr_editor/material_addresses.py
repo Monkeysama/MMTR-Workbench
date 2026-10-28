@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 import re
 
-from .dxil_sources import parse, handle_sources
+from .dxil_sources import ensure_graph, handle_sources, parse
 
 
 # 布局描述参数区、纹理索引区和 GPBF 索引区；本次只允许末尾追加，不移动既有参数。
@@ -33,8 +33,9 @@ class MaterialTailLayout:
 
 
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
-def material_reads(ir, *, include_static=False):
-    definitions, uses, _ = parse(ir)
+def material_reads(ir, *, include_static=False, graph=None):
+    graph = ensure_graph(ir, graph)
+    definitions, uses = graph.definitions, graph.uses
     origins = handle_sources(ir, definitions)
     for row in definitions.values():
         if not row['text'].startswith('call %dx.types.Handle @dx.op.annotateHandle('):
@@ -126,13 +127,13 @@ def material_reads(ir, *, include_static=False):
 
 
 # 仅重写经来源证明的读取和参数实例步长；保留所有原计算/控制流，用新命名SSA避免重排编号。
-def relocate_material_reads(ir, old, new, *, reads=None, relocation=None):
+def relocate_material_reads(ir, old, new, *, reads=None, relocation=None, graph=None):
     if old.parameter_bytes % 16 or new.parameter_bytes % 16 or (new.parameter_bytes < old.parameter_bytes and relocation is None):
         raise ValueError('只接受16字节对齐的参数区末尾扩容。')
     if relocation is not None and (relocation.old != old or relocation.new != new):
         raise ValueError('删除地址映射与源/最终布局不一致。')
     reads = material_reads(ir, include_static=relocation is not None) if reads is None else reads
-    uses = parse(ir)[1] if relocation is not None else None
+    uses = ensure_graph(ir, graph).uses if relocation is not None else None
     replacements, changes, strides = {}, [], {}
     expected = {}
     # 每个SSA只索引一次，按行构造候选；不为每处迁移全文搜索/替换。
