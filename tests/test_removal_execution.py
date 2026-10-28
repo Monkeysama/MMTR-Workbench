@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import test_material_batch as fixture
-from mmtr_editor.dxc_process import compile_hlsl
+from mmtr_editor.dxc_process import compile_hlsl, disassemble_shader
 from mmtr_editor.hashes import xxh64
 from mmtr_editor.rpc import Service
 from mmtr_editor.material_removal_service import apply_material_removal
@@ -134,6 +134,46 @@ class NativeRemovalExecutionTests(unittest.TestCase):
         with patch('mmtr_editor.material_process.run_material_task', side_effect=EditError('native failed')):
             with self.assertRaisesRegex(EditError, 'native failed'):
                 self.remove(actions)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_native_marker_compaction_recompiles_guard_and_rejects_stale_counts(self):
+        from mmtr_editor.material_addresses import material_reads
+        from mmtr_editor.material_markers import material_marker_reads
+        self.extend([dict(action='parameter', name='Dead', byte_size=16), dict(action='texture', name='DeadMap')])
+        source = '''
+cbuffer UserMaterial:register(b0) {float4 VAR_Value:packoffset(c0); float4 VAR_Dead:packoffset(c1);};
+StructuredBuffer<uint4> BindlessBuffer:register(t6);
+Texture2D<float4> BaseMap:register(t3);
+float4 main(float4 p:SV_Position):SV_Target {
+    uint marker=BindlessBuffer[(asuint(p.z)>>4)+3].x;
+    if(marker!=2056) return 0;
+    return BaseMap.Load(int3(p.xy,0))+VAR_Value;
+}
+'''
+        blob = compile_hlsl(str(fixture.NATIVE_DXC), source, 'main', 'ps_6_6')[0]
+        for index in range(2):
+            self.service.doc.replace_shader(index, blob, allow_interface_change=True)
+        self.service.doc = Document(self.service.doc.build()[0], self.service.doc.source)
+        result = self.remove([dict(action='parameter', name='Dead'), dict(action='texture', name='DeadMap')])
+        self.assertEqual([s['material_markers'] for s in result['interface_sync']['shader_reports']], [1, 1])
+        final = Document(self.service.doc.build()[0], self.service.doc.source)
+        material = self.service.mdf.material(0)
+        layout = current_layout(final, material)
+        for index in range(2):
+            ir = disassemble_shader(str(fixture.NATIVE_DXC), final.shader_bytes(index))
+            _, guards = material_marker_reads(ir, layout, sum(p['count'] for p in material['properties']), material_reads(ir))
+            self.assertEqual(len(guards), 1)
+            self.assertIn(', 1028', guards[0]['text'])
+            self.assertEqual(guards[0]['read']['extracts'][0]['offset'], 32)
+
+        # 再次替换成旧比较值时，预检失败且两个文档都保留用户当前状态。
+        stale = source.replace('+3]', '+2]').replace('float4 VAR_Dead:packoffset(c1);', '')
+        blob = compile_hlsl(str(fixture.NATIVE_DXC), stale, 'main', 'ps_6_6')[0]
+        self.service.doc.replace_shader(0, blob, allow_interface_change=True)
+        self.service.doc = Document(self.service.doc.build()[0], self.service.doc.source)
+        before = self.snapshot()
+        with self.assertRaisesRegex(EditError, '标记'):
+            self.remove([dict(action='texture', name='BaseMap')])
         self.assertEqual(self.snapshot(), before)
 
     def test_unknown_source_binding_counts_and_unrepresented_members_fail_before_mutation(self):

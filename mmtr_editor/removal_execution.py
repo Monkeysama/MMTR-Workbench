@@ -5,6 +5,7 @@ import re
 
 from inspect_mmtr import reflection
 from .material_addresses import material_reads
+from .material_markers import material_marker_reads
 from .material_extension import bodies, chunks, current_layout, reflection_container, replace_chunks
 from .material_removal import plan_removal_layout, prove_shader_removal, remap_shader_reads
 from .model import Document, EditError, interface_chunks
@@ -20,6 +21,18 @@ def _reads(ir):
         for read in material_reads(bindings+function, include_static=True):
             for ex in read['extracts']:
                 result[name, ex['ssa']] = (ex['offset'], read['kind'], read['stride'])
+    return result
+
+
+def _guards(ir, layout, components):
+    """按函数及 SSA 记录已证明的 guard；编译后不能少检查、换来源或复用旧计数。"""
+    bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))+'\n'
+    result = []
+    for function in re.findall(r'^define .*?^}', ir, re.M | re.S):
+        name = re.search(r'@([^ (]+)\(', function)[1]
+        source = bindings+function
+        _, guards = material_marker_reads(source, layout, components, material_reads(source, include_static=True))
+        result.extend((name, g['extract'], g['comparison']) for g in guards)
     return result
 
 
@@ -54,6 +67,7 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                 before = reflection(ir)
                 edited, migration = remap_shader_reads(ir, layout)
                 expected_reads = _reads(edited)
+                expected_guards = _guards(edited, layout.new, layout.new_components)
                 edited = patch_removal_declarations(edited, layout, before)
                 reflected_ir = compiler.disassemble(reflection_container(original))
                 if re.search(r'^define ', reflected_ir, re.M):
@@ -68,6 +82,8 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                     raise EditError('删除后 Shader 原计算或签名发生意外变化。')
                 if _reads(actual) != expected_reads:
                     raise EditError('删除后保留字段读取地址/实例步长与计划不一致。')
+                if _guards(actual, layout.new, layout.new_components) != expected_guards:
+                    raise EditError('删除后材质布局标记未按新 MDF 计数完整保留。')
                 for _, (_, kind, stride) in _reads(actual).items():
                     if kind == 'instance' and stride and stride['bytes'] != layout.new.parameter_bytes:
                         raise EditError('删除后实例步长不一致。')
@@ -91,12 +107,12 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                             variable['offset'] = moves[variable['name'].removeprefix('VAR_')].new_offset
                     if updated != expected:
                         raise EditError('删除后常量缓冲反射与字段身份不一致。')
-                cache[key] = payload, after
-            payload, after = cache[key]
+                cache[key] = payload, after, len(expected_guards)
+            payload, after, markers = cache[key]
             candidate.replace_shader(index, payload, allow_interface_change=True,
                 note={'material_removal': True, 'dxc_validated': True})
             reflections[index] = hashlib.sha256(payload).digest(), after
-            reports.append(dict(index=index, sha256=hashlib.sha256(payload).hexdigest()))
+            reports.append(dict(index=index, sha256=hashlib.sha256(payload).hexdigest(), material_markers=markers))
         operation = dict(kind='remove_material_interface', layout=layout.report(),
             shader_hashes={str(i): hashlib.sha256(candidate.shader_bytes(i)).hexdigest() for i in reflections},
             redirects=[[r, f, t] for (r, f), t in sorted(candidate.redirects.items())])

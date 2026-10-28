@@ -90,7 +90,7 @@ class MaterialRemovalTests(unittest.TestCase):
 
     def test_deleted_texture_or_unknown_tail_is_blocked(self):
         result = plan_removal_layout(layout(), self.props(), [{'action': 'texture', 'name': 'BaseMap'}])
-        with self.assertRaisesRegex(EditError, '读取偏移'):
+        with self.assertRaisesRegex(EditError, '读取偏移|未知材质尾部'):
             prove_shader_removal(TEXTURE_IR, result)
 
     def test_static_heap_and_instance_live_words_follow_field_identity(self):

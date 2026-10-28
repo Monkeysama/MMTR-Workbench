@@ -9,7 +9,9 @@ import json
 import re
 
 from .material_addresses import MaterialTailLayout, material_reads
+from .material_markers import material_marker_reads, relocate_material_markers
 from .material_usage import shader_input_reads
+from .dxil_sources import parse
 from .model import EditError
 
 
@@ -30,6 +32,8 @@ class RemovalLayout:
     parameters: tuple[ParameterMove, ...]
     removed_parameters: tuple[str, ...]
     removed_textures: tuple[str, ...]
+    old_components: int
+    new_components: int
 
     @property
     def digest(self):
@@ -73,6 +77,8 @@ def plan_removal_layout(old, properties, actions):
                 or size not in (4, 8, 12, 16) or start < end or start % 4
                 or start+size > old.parameter_bytes or start//16 != (start+size-1)//16):
             raise EditError('原参数名称、范围或float1..4布局不在删除支持范围。')
+        if type(parameter.get('count', size//4)) is not int or parameter.get('count', size//4) != size//4:
+            raise EditError('MDF 参数分量数与实际字节范围不一致。')
         names.add(name)
         end = start+size
     removed, selected = {'parameter': [], 'texture': []}, set()
@@ -103,7 +109,11 @@ def plan_removal_layout(old, properties, actions):
         moves = [ParameterMove(p['name'], p['offset'], p['offset'], p['byte_size']) for p in ordered]
     size = (cursor+15)&~15 if removed['parameter'] else old.parameter_bytes
     new = MaterialTailLayout(size, tuple(t for t in old.texture_names if t not in removed['texture']), old.gpbf_names)
-    return RemovalLayout(old, new, tuple(moves), tuple(removed['parameter']), tuple(removed['texture']))
+    # MDF 标量数独立于参数块大小；删去填充行内的属性也必须改变布局标记。
+    old_components = sum(p.get('count', p['byte_size']//4) for p in ordered)
+    new_components = sum(p.byte_size//4 for p in moves)
+    return RemovalLayout(old, new, tuple(moves), tuple(removed['parameter']), tuple(removed['texture']),
+                         old_components, new_components)
 
 
 def shader_removal_reads(ir):
@@ -131,18 +141,26 @@ def prove_shader_removal(ir, layout):
     if reads['errors']:
         raise EditError('删除覆盖不足：'+reads['errors'][0][1])
     bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
+    record_words, parameter_words, markers = set(), set(), 0
     for function in re.findall(r'^define .*?^}', ir, flags=re.M | re.S):
-        for read in material_reads(bindings+'\n'+function, include_static=True):
+        source = bindings+'\n'+function
+        _, uses, _ = parse(source)
+        ordinary, guards = material_marker_reads(source, layout.old, layout.old_components,
+                                                 material_reads(source, include_static=True))
+        markers += len(guards)
+        for read in ordinary:
             if read['stride'] is not None and read['stride']['bytes'] != layout.old.parameter_bytes:
                 raise EditError('实例步长与原参数区尺寸不一致。')
-    for offset in reads['record']:
-        layout.offset_in(offset)
-    for offset in reads['instance'] | reads['cbuffer']:
-        layout.offset_in(offset, instance=True)
+            for extract in read['extracts']:
+                if not uses.get(extract['ssa']):
+                    continue
+                instance = read['kind'] in ('instance', 'static')
+                layout.offset_in(extract['offset'], instance=instance)
+                (parameter_words if instance else record_words).add(extract['offset'])
     if set(layout.removed_textures) & reads['textures']:
         raise EditError('待删除纹理仍有静态资源句柄消费者。')
-    return {'layout_digest': layout.digest, 'record_words': sorted(reads['record']),
-            'parameter_words': sorted(reads['cbuffer'] | reads['instance']),
+    return {'layout_digest': layout.digest, 'record_words': sorted(record_words),
+            'parameter_words': sorted(parameter_words), 'material_markers': markers,
             'named_textures': sorted(reads['textures']), 'scope': 'bounded_dxil_consumers',
             'requires_candidate_validation': True, 'game_tested': False}
 
@@ -155,7 +173,11 @@ def remap_shader_reads(ir, layout):
     reports = []
     def function(match):
         source = bindings+name_numeric_locals(match[0])+'\n'
-        edited, report = relocate_material_reads(source, layout.old, layout.new, relocation=layout)
+        edited, ordinary, guards = relocate_material_markers(source, layout.old, layout.new,
+            layout.old_components, layout.new_components-layout.old_components,
+            material_reads(source, include_static=True))
+        edited, report = relocate_material_reads(edited, layout.old, layout.new, reads=ordinary, relocation=layout)
+        report['material_markers'] = len(guards)
         reports.append(report)
         return edited[len(bindings):].removesuffix('\n')
     edited = re.sub(r'^define .*?^}', function, ir, flags=re.M | re.S)
