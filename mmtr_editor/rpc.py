@@ -206,7 +206,8 @@ class Service:
             arguments = (self, req['dll'], req.get('actions'), req.get('record_index'), req.get('source_revision', 0))
             if op == 'material_plan':
                 return prepare_material_batch(*arguments)[0].report()
-            return apply_material_batch(*arguments, expected_plan=req.get('expected_plan'))
+            return apply_material_batch(*arguments, expected_plan=req.get('expected_plan'),
+                                        max_workers=req.get('max_workers'))
         if op == 'mmtr_validate_interfaces':
             if self.doc is None:
                 raise EditError('请先打开 MMTR。')
@@ -676,7 +677,8 @@ class RpcSession:
                 return self._with_context(context.jobs.preview(request.get('actions'), request.get('record_index'), variant=request.get('variant')), context_id)
             if op == 'material_job_submit':
                 return self._with_context(context.jobs.submit(request.get('actions'), request.get('record_index'),
-                                        request.get('expected_plan'), request.get('request_key'), variant=request.get('variant')), context_id)
+                                        request.get('expected_plan'), request.get('request_key'), variant=request.get('variant'),
+                                        max_workers=request.get('max_workers')), context_id)
             if op == 'material_project_save':
                 from .material_project import save_project
                 return self._with_context(save_project(context, request['path'], request.get('actions'), request.get('record_index'),

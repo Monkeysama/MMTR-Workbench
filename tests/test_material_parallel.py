@@ -35,9 +35,21 @@ class MaterialShardTests(unittest.TestCase):
 
     def test_worker_and_total_source_budget_are_bounded(self):
         with self.assertRaisesRegex(EditError, 'worker'):
-            self.plan(workers=5)
+            self.plan(workers=9)
         with mock.patch('mmtr_editor.material_parallel.SHARD_SOURCE_BYTES', 60):
             self.assertEqual(self.plan(), [[0]])
+
+    def test_auto_selection_reports_serial_group_limit_without_starting_children(self):
+        selected = []
+        with mock.patch('mmtr_editor.material_scheduling.available_resources', return_value=(28, 16*1024**3)), \
+             mock.patch('mmtr_editor.material_parallel.subprocess.Popen') as launch:
+            result = run_shards(self.document, {}, '', [], 0, {}, self.digest, '2'*64, '3'*64,
+                                self.info, set(), lambda *args: None, scheduling=selected.append)
+        self.assertIsNone(result)
+        launch.assert_not_called()
+        self.assertEqual(selected[0]['policy_limit'], 8)
+        self.assertEqual(selected[0]['selected_workers'], 1)
+        self.assertIn('shader_groups_or_source_budget', selected[0]['reasons'])
 
     def test_exact_pack_is_accepted_and_identity_or_coverage_tampering_is_rejected(self):
         index = 0

@@ -245,4 +245,8 @@ P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取
 
 同一会话按全部编辑值缓存重建结果及已解析结构。验证结论还绑定 DXC 路径和 DLL 内容；Shader、元数据、迁移证明、引用或 DXC 改变后均重新检查。自动扩展完成后立即调用 `validate` 或 `export` 可以复用已验证结果。重新打开导出文件时，内存缓存不会写入资产或跨进程复用。
 
-旧 `workbench_add_parameter/add_texture` 仍是同步长调用。混合批次和独立变体优先使用 `workbench_material_preview/submit/status/cancel/result`；短提交与查询避免长调用结果不明。单个材质扩展在隔离 worker 内最多启动 4 个受控子进程，按完整缓存键分组；每片工作集上限为 128 MiB 源数据与 64 MiB 载荷缓存，整组上限 240 秒（分片不足或预算不允许时退回串行）。任一子进程失败、超时、取消或返回不完整/重复覆盖时整批丢弃，父 worker 仍执行全局重建、重开、接口验证和 DXC 身份核对，外层 worker 的 300 秒上限与作业对象回收继续兜底。超时重试沿用原请求键和内容，不能换键重复追加。更大的文件仍可能需要较长时间，不能把某个本地样本的耗时当作全部 MMTR 的上限。
+旧 `workbench_add_parameter/add_texture` 仍是同步长调用。混合批次和独立变体优先使用 `workbench_material_preview/submit/status/cancel/result`；短提交与查询避免长调用结果不明。桌面和 MCP 的材质扩展均在任务开始时自动选择并发数：进程可用逻辑核数的一半（向下取整、至少 1）、可用内存预算、有效 Shader 分组数和 8 的最小值，运行中不改变。内存预算先留出 1 GiB，每片估算为 `max(256 MiB, 4 × 源容器及已有替换字节数 + 128 MiB)`；这是保守调度估计，不是进程 RSS 硬上限。资源探测失败、分组不足或源数据预算不允许时退回串行。
+
+`workbench_material_submit` 可选 `max_workers: 1..8`，仅降低自动上限，例如 `max_workers: 4`；省略或 `null` 表示自动，`1` 表示串行。`preview` 的内容计划与并发无关，不需要该参数。同一个 `request_key` 重试必须保持动作、计划和 `max_workers` 全部相同，不能换键重复追加。`status` 的 `concurrency`（准备完成前为 `null`）报告 `selected_workers`、`requested_max_workers`、CPU/内存事实和选择原因；最终结果的 `interface_sync.concurrency` 保留同一选择，桌面任务面板显示实际进程数。
+
+每片仍限制为 128 MiB 源数据与 64 MiB 载荷缓存，整组上限 240 秒。任一子进程失败、超时、取消或返回不完整/重复覆盖时整批丢弃，父 worker 仍执行全局重建、重开、接口验证和 DXC 身份核对，外层 worker 的 300 秒上限与作业对象回收继续兜底。进度快照遇到 Windows 读句柄阻止替换时允许暂时滞后并在下次回调重试，最终结果使用独立协议，进度不能决定候选是否通过。更大的文件仍可能需要较长时间，不能把某个本地样本的耗时当作全部 MMTR 的上限。

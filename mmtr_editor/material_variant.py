@@ -132,7 +132,7 @@ def _check_source(service, dll, plan):
         raise EditError('变体源文档、所选材质或 DXC 已改变，必须重新规划。')
 
 
-def build_material_variant(service, dll, actions, record_index, plan, *, worker_control=None):
+def build_material_variant(service, dll, actions, record_index, plan, *, worker_control=None, max_workers=None):
     """独立快照上迁移接口；源编辑始终保留，验证未选材质的完整公开语义未改变。"""
     from .material_service import apply_material_batch
     _check_source(service, dll, plan)
@@ -143,7 +143,8 @@ def build_material_variant(service, dll, actions, record_index, plan, *, worker_
             expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master)
     else:
         report = apply_material_batch(candidate, dll, actions, record_index, plan.edit.source_revision,
-            expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master)
+            expected_plan=plan.edit.digest, worker_control=worker_control, variant_master=plan.edit.variant_master,
+            max_workers=max_workers)
     mmtr_bytes, mdf_bytes = candidate.doc.build()[0], candidate.mdf.build()[0]
     reopened = MdfDocument(mdf_bytes, candidate.mdf.source)
     original = MdfDocument(service.mdf.build()[0], service.mdf.source)

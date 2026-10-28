@@ -70,6 +70,15 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
         self.assertEqual(tools['workbench_redirect'].input_schema['properties']['field']['type'], 'integer')
+        caps = tools['workbench_material_submit'].input_schema['properties']['max_workers']['anyOf']
+        bound = next(value for value in caps if value.get('type') == 'integer')
+        self.assertEqual((bound['minimum'], bound['maximum']), (1, 8))
+
+    async def test_material_worker_cap_rejects_invalid_types_before_submitting(self):
+        for cap in (0, 9, True, '4'):
+            with self.subTest(cap=cap), self.assertRaises(ToolError):
+                await self.call('material_submit', actions=[dict(action='parameter', name='Extra', byte_size=4)],
+                                expected_plan='0'*64, request_key='cap', max_workers=cap)
 
     async def test_validation_scope_is_explicit_skips_without_delta_and_never_changes_revision(self):
         from mmtr_editor.model import Document

@@ -11,6 +11,12 @@ const states: Record<string, string> = {
 const label = computed(() => (props.job.scope === "independent_variant" && props.job.state === "succeeded")
   ? materialJobStageLabels[props.job.stage] ?? props.job.stage : states[props.job.state] ?? materialJobStageLabels[props.job.stage] ?? props.job.stage);
 const percent = computed(() => props.job.total ? Math.round(props.job.completed / props.job.total * 100) : 0);
+const concurrency = computed(() => {
+  const value = props.job.concurrency;
+  if (!value) return "";
+  const mode = value.mode === "capped" ? `手动上限 ${value.requested_max_workers}` : "自动选择";
+  return `${value.selected_workers} 个进程 · ${mode}`;
+});
 </script>
 <template>
   <section class="job-panel" aria-live="polite">
@@ -20,6 +26,7 @@ const percent = computed(() => props.job.total ? Math.round(props.job.completed 
       <span class="job-time">{{ job.elapsed_seconds.toFixed(1) }} 秒</span>
       <ElButton v-if="!terminalJob(job)" :disabled="job.state === 'cancelling'" @click="$emit('cancel')">取消任务</ElButton>
     </div>
+    <p v-if="concurrency" class="job-concurrency">{{ concurrency }}</p>
     <ElProgress v-if="!terminalJob(job)" :percentage="percent" :show-text="false" :indeterminate="!job.total" />
   </section>
 </template>
@@ -27,4 +34,5 @@ const percent = computed(() => props.job.total ? Math.round(props.job.completed 
 .job-panel { padding: 14px; border: 1px solid var(--el-border-color); border-radius: 6px; }
 .job-heading { display: flex; gap: 16px; align-items: center; margin-bottom: 8px; }
 .job-time { margin-left: auto; color: var(--el-text-color-secondary); }
+.job-concurrency { margin: 0 0 8px; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

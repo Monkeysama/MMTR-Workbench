@@ -41,13 +41,14 @@ export interface MaterialJob {
   total: number;
   elapsed_seconds: number;
   error: string | null;
+  concurrency?: { selected_workers: number; requested_max_workers: number | null; mode: "auto" | "capped" } | null;
   scope?: "shared_master" | "independent_variant";
   candidate_available?: boolean;
   exported?: boolean;
 }
 
 export const materialJobStageLabels: Record<string, string> = {
-  queued: "等待执行", preparing: "准备候选", starting: "启动 DXC", planning: "核对计划",
+  queued: "等待执行", preparing: "准备候选", starting: "启动 DXC", planning: "核对计划", scheduling: "选择并发数",
   shaders: "处理 Shader", shards: "处理 Shader 分片", building: "重建 MMTR", validating: "验证接口",
   validated: "候选已验证", committing: "核对源状态", complete: "修改已暂存",
   candidate_ready: "候选已验证", exporting: "正在导出", exported: "变体已导出", discarded: "候选已丢弃",

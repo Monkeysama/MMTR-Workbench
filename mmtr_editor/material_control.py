@@ -118,7 +118,10 @@ def controlled_material_process(command, request, *, cwd, timeout, control):
                             if (isinstance(progress, dict) and isinstance(progress.get('stage'), str)
                                     and type(progress.get('completed')) is int and type(progress.get('total')) is int
                                     and 0 <= progress['completed'] <= progress['total']):
-                                control.progress(stage=progress['stage'], completed=progress['completed'], total=progress['total'])
+                                extra = ({'concurrency': progress['concurrency']}
+                                         if isinstance(progress.get('concurrency'), dict) else {})
+                                control.progress(stage=progress['stage'], completed=progress['completed'],
+                                                 total=progress['total'], **extra)
                                 last_progress = raw
                     except (OSError, ValueError):
                         pass  # 原子替换前尚无进度文件；不能把进度缺失误报为计算失败。
@@ -143,13 +146,19 @@ def progress_writer(path):
         return None
     target = Path(path)
     previous = [None, 0.0]
+    selection = {}
 
-    def report(stage, completed=0, total=0):
+    def report(stage, completed=0, total=0, *, concurrency=None):
+        if concurrency is not None:
+            selection.update(concurrency)
         now = time.monotonic()
         if stage == previous[0] and completed != total and now-previous[1] < 0.1:
             return
         pending = target.with_suffix('.pending')
-        pending.write_text(json.dumps(dict(stage=stage, completed=completed, total=total)), encoding='utf-8')
+        value = dict(stage=stage, completed=completed, total=total)
+        if selection:
+            value['concurrency'] = selection
+        pending.write_text(json.dumps(value), encoding='utf-8')
         try:
             os.replace(pending, target)
         except PermissionError:

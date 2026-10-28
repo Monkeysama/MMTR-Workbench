@@ -310,9 +310,11 @@ float4 main(float4 position: SV_Position) : SV_Target {
                 serial = extend_material_interface(serial_doc, _public_data(serial_mdf.material(0)), str(NATIVE_DXC),
                                                   actions=action, record_index=0, parallel=False)
                 events = []
-                parallel = extend_material_interface(parallel_doc, _public_data(parallel_mdf.material(0)), str(NATIVE_DXC),
-                                                      actions=action, record_index=0, parallel=True,
-                                                      progress=lambda *event: events.append(event))
+                # 固定资源只用于证明两片协议；自动硬件策略另有低资源回归。
+                with patch('mmtr_editor.material_scheduling.available_resources', return_value=(4, 16*1024**3)):
+                    parallel = extend_material_interface(parallel_doc, _public_data(parallel_mdf.material(0)), str(NATIVE_DXC),
+                                                          actions=action, record_index=0, parallel=True,
+                                                          progress=lambda *event: events.append(event))
                 self.assertIn(('shards', 2, 2), events)
                 self.assertEqual(parallel_doc.build()[0], serial_doc.build()[0])
                 self.assertEqual(parallel['changed_shaders'], 2)

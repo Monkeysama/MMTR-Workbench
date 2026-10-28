@@ -49,6 +49,7 @@ class _Job:
     variant_candidate: object | None = None
     exported: dict | None = None
     operation: str = 'extend'
+    concurrency: dict | None = None
 
 
 class MaterialJobs:
@@ -89,8 +90,11 @@ class MaterialJobs:
                                  self.owner.revision, variant)[1]
 
     # 先核对幂等键，再检查当前源；成功后重试不会因新增名称已存在而重新执行。
-    def submit(self, actions, record_index, expected_plan, request_key, *, variant=None):
-        return self._submit(actions, record_index, expected_plan, request_key, variant=variant)
+    def submit(self, actions, record_index, expected_plan, request_key, *, variant=None, max_workers=None):
+        from .material_scheduling import validate_max_workers
+        validate_max_workers(max_workers)
+        return self._submit(actions, record_index, expected_plan, request_key, variant=variant,
+                            max_workers=max_workers)
 
     def removal_preview(self, actions, material_index, request_key, *, variant=None):
         """短调用快照并启动只读消费者证明；与修改任务共享取消、去重及会话生命周期。"""
@@ -103,14 +107,15 @@ class MaterialJobs:
                             material_index=material_index, variant=variant)
 
     def _submit(self, actions, record_index, expected_plan, request_key, *, variant=None,
-                operation='extend', material_index=None):
+                operation='extend', material_index=None, max_workers=None):
         if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128 or not request_key.strip():
             raise EditError('request_key 必须是 1..128 字符的非空字符串。')
         if operation in ('extend', 'removal') and (not isinstance(expected_plan, str) or not re.fullmatch('[0-9a-f]{64}', expected_plan)):
             raise EditError('expected_plan 必须是预览返回的计划 digest。')
         try:
             encoded = json.dumps(dict(actions=actions, record_index=record_index, expected_plan=expected_plan,
-                                      variant=variant, operation=operation, material_index=material_index),
+                                      variant=variant, operation=operation, material_index=material_index,
+                                      max_workers=max_workers),
                                  sort_keys=True, ensure_ascii=True, allow_nan=False)
             request = json.loads(encoded)  # 调用方之后改动列表不能改变本次请求。
         except (TypeError, ValueError) as exc:
@@ -172,13 +177,15 @@ class MaterialJobs:
                     raise
                 return self._status(job)
 
-    def _progress(self, job, *, stage, completed=0, total=0, worker_pid=None):
+    def _progress(self, job, *, stage, completed=0, total=0, worker_pid=None, concurrency=None):
         with self.lock:
             if job.state in TERMINAL:
                 return
             job.stage, job.completed, job.total = stage, completed, total
             if worker_pid is not None:
                 job.worker_pid = worker_pid
+            if concurrency is not None:
+                job.concurrency = deepcopy(concurrency)
 
     # 候选计算不持 owner.lock；最终身份检查和替换同处一个临界区，取消不能插入半次提交。
     def _run(self, job, candidate, dll, request, source):
@@ -187,6 +194,8 @@ class MaterialJobs:
                 job.control.check()
                 job.state, job.stage = 'running', 'preparing'
             variant_candidate = None
+            execution = ({'max_workers': request['max_workers']}
+                         if request.get('max_workers') is not None else {})
             if job.operation == 'removal_preview':
                 extra = {} if job.variant_plan is None else {'variant_master': job.variant_plan.edit.variant_master}
                 result = analyze_removal_preview(candidate, dll, request['actions'],
@@ -198,7 +207,7 @@ class MaterialJobs:
             elif job.variant_plan is not None:
                 from .material_variant import build_material_variant
                 variant_candidate = build_material_variant(candidate, dll, request['actions'],
-                    request['record_index'], job.variant_plan, worker_control=job.control)
+                    request['record_index'], job.variant_plan, worker_control=job.control, **execution)
                 result = {**variant_candidate.report, 'plan': job.plan, 'scope': 'independent_variant'}
             elif job.operation == 'removal':
                 result = apply_material_removal(candidate, dll, request['actions'],
@@ -206,7 +215,11 @@ class MaterialJobs:
                     worker_control=job.control)
             else:
                 result = apply_material_batch(candidate, dll, request['actions'], request['record_index'],
-                    job.plan['source_revision'], expected_plan=job.plan['digest'], worker_control=job.control)
+                    job.plan['source_revision'], expected_plan=job.plan['digest'], worker_control=job.control, **execution)
+            selection = result.get('interface_sync', {}).get('concurrency')
+            if selection is not None:
+                with self.lock:
+                    job.concurrency = deepcopy(selection)
             job.control.check()
             self._progress(job, stage='committing')
             with self.owner.lock:
@@ -252,6 +265,7 @@ class MaterialJobs:
             elapsed_seconds=(job.ended or time.monotonic())-job.started, source_revision=job.plan['source_revision'],
             committed_revision=job.committed_revision, error=job.error, details=job.details,
             operation=job.operation,
+            concurrency=deepcopy(job.concurrency),
             scope='readonly_analysis' if job.operation == 'removal_preview' else
                   'independent_variant' if job.variant_plan is not None else 'shared_master',
             candidate_available=job.variant_candidate is not None, exported=job.exported is not None)

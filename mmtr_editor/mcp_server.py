@@ -23,6 +23,7 @@ from .bounded_cache import ByteLRU
 
 Index = Annotated[int, Field(ge=0)]
 Limit = Annotated[int, Field(ge=1, le=100)]
+MaxWorkers = Annotated[int, Field(strict=True, ge=1, le=8)]
 Name = Annotated[str, Field(min_length=1, max_length=256)]
 Values = Annotated[list[FiniteFloat], Field(min_length=1, max_length=64)]
 
@@ -262,11 +263,13 @@ def create_server(session=None):
     def workbench_material_submit(actions: MaterialActions, expected_plan: str,
                                   request_key: Annotated[str, Field(min_length=1, max_length=128)],
                                   record_index: Index | None = None,
-                                  variant: VariantOptions | None = None) -> dict[str, Any]:
-        """短调用提交后台批次；超时重试必须沿用相同 request_key、动作及计划，防止重复新增。"""
+                                  variant: VariantOptions | None = None,
+                                  max_workers: MaxWorkers | None = None) -> dict[str, Any]:
+        """提交后台批次，默认按 CPU/内存自动并发；max_workers 可限制为 1..8。重试沿用原请求全部内容。"""
         return state.jobs.submit([a.model_dump(exclude_none=True) for a in actions], record_index,
                                   expected_plan, request_key,
-                                  variant=variant.model_dump() if variant is not None else None)
+                                  variant=variant.model_dump() if variant is not None else None,
+                                  max_workers=max_workers)
 
     @tool(job=True)
     def workbench_material_status(job_id: str) -> dict[str, Any]:

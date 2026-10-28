@@ -85,6 +85,31 @@ class MaterialJobTests(unittest.TestCase):
             self.assertEqual((result['shader_reports_total'], result['shader_reports_next_offset']), (6, 4))
             self.assertEqual(self.jobs.cancel(job['job_id'])['state'], 'succeeded')
 
+    def test_worker_cap_is_forwarded_deduplicated_and_selection_remains_in_status(self):
+        selection = dict(selected_workers=4, requested_max_workers=4, mode='capped', reasons=['requested_cap'])
+        def apply(*args, max_workers=None, **kwargs):
+            self.assertEqual(max_workers, 4)
+            kwargs['worker_control'].progress(stage='scheduling', concurrency=selection)
+            result = self.fake_apply(*args, **kwargs)
+            result['interface_sync']['concurrency'] = selection
+            return result
+        def submit(cap):
+            return self.jobs.submit(self.actions, 0, self.plan['digest'], 'cap', max_workers=cap)
+        with patch('mmtr_editor.material_jobs.apply_material_batch', side_effect=apply):
+            job = submit(4)
+            self.assertTrue(self.entered.wait(2))
+            self.assertEqual(submit(4)['job_id'], job['job_id'])
+            with self.assertRaisesRegex(EditError, '相同 request_key'):
+                submit(2)
+            status = self.jobs.status(job['job_id'])
+            self.assertEqual(status['concurrency'], selection)
+            status['concurrency']['selected_workers'] = 99
+            self.assertEqual(self.jobs.status(job['job_id'])['concurrency'], selection)
+            self.release.set()
+            status = self.wait(job)
+            self.assertEqual(status['state'], 'succeeded')
+            self.assertEqual(status['concurrency'], selection)
+
     def test_dedupe_conflict_active_limit_and_request_copy(self):
         with patch('mmtr_editor.material_jobs.apply_material_batch', side_effect=self.fake_apply):
             job = self.submit()
@@ -257,12 +282,14 @@ class ControlledMaterialProcessTests(unittest.TestCase):
     def test_large_input_and_progress_keep_protocol_clean(self):
         events = []
         result = self.run_child('import sys,json,time,pathlib; r=json.load(sys.stdin); '
-            'pathlib.Path(r["progress_file"]).write_text(json.dumps(dict(stage="shaders",completed=2,total=8))); '
+            'pathlib.Path(r["progress_file"]).write_text(json.dumps(dict(stage="shaders",completed=2,total=8, '
+            'concurrency=dict(selected_workers=4)))); '
             'time.sleep(.3); print(json.dumps(dict(length=len(r["payload"]))))',
             WorkerControl(lambda **value: events.append(value)), payload='x'*2000000)
         self.assertEqual(json.loads(result.stdout)['length'], 2000000)
         self.assertEqual(result.stderr, b'')
         self.assertIn('shaders', [event['stage'] for event in events])
+        self.assertIn({'selected_workers': 4}, [event.get('concurrency') for event in events])
 
     def test_cancel_timeout_crash_and_callback_failure_reap_owned_child(self):
         for mode in ('cancel', 'timeout', 'callback'):
@@ -300,10 +327,17 @@ class ControlledMaterialProcessTests(unittest.TestCase):
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 deadline = time.monotonic()+4
-                while not marker.exists() and parent.poll() is None and time.monotonic() < deadline:
+                pid = None
+                # 文件创建先于 write_text 完成；只在拿到完整所有权事件后才强杀父进程。
+                while parent.poll() is None and time.monotonic() < deadline:
+                    try:
+                        pid = json.loads(marker.read_text())['worker_pid']
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        pass
+                    if pid is not None:
+                        break
                     time.sleep(.01)
-                self.assertTrue(marker.exists(), 'parent failed before worker ownership')
-                pid = json.loads(marker.read_text())['worker_pid']
+                self.assertIsNotNone(pid, 'parent failed before worker ownership')
                 self.assertTrue(self.alive(pid))
                 parent.kill()
                 parent.communicate(timeout=3)

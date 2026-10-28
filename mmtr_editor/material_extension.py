@@ -312,7 +312,7 @@ def texture_tables(document, layout, record_index):
 # 旧单项入口只包装一个计划动作，与批量共用一次迁移/编译路径。
 def extend_material_interface(document, material, dll, *, parameter=None, texture=None, record_index=None,
                               actions=None, plan_context=None, expected_plan=None, progress=None,
-                              parallel=False, shard_indices=None):
+                              parallel=False, shard_indices=None, max_workers=None, scheduling=None):
     from .dxil_assembly import DxilAssembly
     from .material_plan import plan_material_edit, dll_identity
     from .material_markers import material_marker_reads, relocate_material_markers
@@ -383,10 +383,16 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     reports, registers, reflections = [], {}, {}
     changed_payloads = {}
     batch = None
+    concurrency = {}
+    def scheduled(selection):
+        concurrency.update(selection)
+        if scheduling is not None:
+            scheduling(selection)
     if parallel and not shard_mode:
         from .material_parallel import run_shards
         batch = run_shards(document, material, dll, actions, record_index, plan_context, plan_digest,
-                           plan.source_sha256, plan.dxc_sha256, info, texture_shaders, progress)
+                           plan.source_sha256, plan.dxc_sha256, info, texture_shaders, progress,
+                           max_workers=max_workers, scheduling=scheduled)
     # 只在同次隔离 worker 内复用，键包含源载荷、阶段、布局/绑定计划及 DXC 身份。
     # 最多保留 64 项/64MiB 载荷，避免把大量 IR 或历史文档留成全局缓存。
     cache, cache_bytes = OrderedDict(), 0
@@ -632,4 +638,5 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
     return {'changed_shaders': len(reports), 'shader_reports': reports, 'srv_records': len(affected),
             'native_texture_shaders': len(native_proofs), 'native_texture_reads': sum(map(len, native_proofs.values())),
             'parameter_bytes': new_size, 'validation': validation, 'plan': plan.report(),
-            'statistics': counters, 'seconds': {**durations, 'total': time.perf_counter()-started}}
+            'statistics': counters, **({'concurrency': concurrency} if concurrency else {}),
+            'seconds': {**durations, 'total': time.perf_counter()-started}}

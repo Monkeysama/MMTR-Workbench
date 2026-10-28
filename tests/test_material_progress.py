@@ -11,6 +11,17 @@ from mmtr_editor.material_parallel import _progress_value
 
 
 class MaterialProgressTests(unittest.TestCase):
+    def test_scheduling_selection_survives_later_progress_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'progress.json'
+            writer = progress_writer(path)
+            selection = dict(selected_workers=6, requested_max_workers=6)
+            writer('scheduling', concurrency=selection)
+            writer('shaders', 2, 10)
+            value = json.loads(path.read_bytes())
+            self.assertEqual(value['concurrency'], selection)
+            self.assertEqual(value['stage'], 'shaders')
+
     def test_open_reader_allows_replacement_and_keeps_complete_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'progress.json'

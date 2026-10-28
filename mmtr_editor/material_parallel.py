@@ -19,9 +19,9 @@ import time
 
 from .material_process import document_state, material_worker_command
 from .model import EditError
+from .material_scheduling import MAX_WORKERS, select_workers
 
 
-MAX_WORKERS = 4
 SHARD_SOURCE_BYTES = 128 * 1024 * 1024
 SHARD_TIMEOUT_SECONDS = 240
 PAYLOAD_CACHE_BYTES = 64 * 1024 * 1024
@@ -239,8 +239,20 @@ def _communicate(process, data):
 
 # 由外层隔离 worker 调用；子进程属于同一进程组/Windows Job，失败时主动回收整组。
 def run_shards(document, material, dll, actions, record_index, plan_context, plan_digest,
-               source_sha256, dxc_sha256, info, texture_shaders, progress, *, workers=MAX_WORKERS):
+               source_sha256, dxc_sha256, info, texture_shaders, progress, *, workers=None,
+               max_workers=None, scheduling=None):
+    # 正常入口只使用自动策略；显式 workers 留给内部受控分片验收。
+    source_bytes = len(document.original)+sum(len(payload) for payload in document.replacements.values())
+    selection = select_workers(source_bytes, max_workers)
+    if workers is None:
+        workers = selection['policy_limit']
     assignments = plan_shards(document, info, plan_digest, texture_shaders, workers=workers)
+    selection['selected_workers'] = max(1, len(assignments))
+    selection['source_bytes'] = source_bytes
+    if len(assignments) < workers:
+        selection['reasons'].append('shader_groups_or_source_budget')
+    if scheduling is not None:
+        scheduling(selection)
     if len(assignments) <= 1:
         return None
     keys_by_index = {}
@@ -321,7 +333,7 @@ def run_shards(document, material, dll, actions, record_index, plan_context, pla
                 last_shader_progress = completed
         if len(validated) != len(assignments):
             raise EditError('Shader 分片结果不完整。')
-        if sum(pack['cache_bytes'] for pack in validated.values()) > MAX_WORKERS*PAYLOAD_CACHE_BYTES:
+        if sum(pack['cache_bytes'] for pack in validated.values()) > len(assignments)*PAYLOAD_CACHE_BYTES:
             raise EditError('所有 Shader 分片载荷缓存超过总预算。')
         covered = [index for number in range(len(assignments)) for index in validated[number]['covered']]
         expected = sorted(shader['index'] for shader in info['shaders'])

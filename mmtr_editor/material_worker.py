@@ -70,7 +70,9 @@ def execute(request):
                                        record_index=request.get('record_index'), actions=request.get('actions'),
                                        plan_context=request.get('plan_context'), expected_plan=request.get('expected_plan'),
                                        progress=progress, parallel=shard_indices is None,
-                                       shard_indices=shard_indices)
+                                       shard_indices=shard_indices, max_workers=request.get('max_workers'),
+                                       scheduling=(lambda selection: progress('scheduling', concurrency=selection))
+                                       if progress is not None else None)
     if shard_indices is not None:
         return result
     return {'document': document_state(document), 'report': result,
