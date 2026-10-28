@@ -91,6 +91,7 @@ export function useWorkbench(options: {
     dll,
     documentId,
     choosePath: (title, kind, value) => path(title, kind, value),
+    game: () => mdfDoc.value?.game,
     blocked: () => busy.value || !!dialog.value || !canAddMaterialInterfaces.value,
     drain: () => mdfEdits.drain(),
     setBusy: value => { busy.value = value; },
@@ -204,7 +205,7 @@ export function useWorkbench(options: {
   }
   async function loadMdf(p: string) {
     if (!(await discard("mdf"))) return false;
-    return run("解析 MDF 2.45…", async () => {
+    return run("解析 MDF…", async () => {
       mdfDoc.value = await request<MdfDocument>("mdf_open", { path: p, material_index: 0 });
       tab.value = "mdf";
       status.value = `已打开 ${basename(p)}`;
@@ -319,7 +320,7 @@ export function useWorkbench(options: {
   }
   async function exportMdf() {
     if (!mdfDoc.value || busy.value) return;
-    const initial = mdfDoc.value.source.replace(/(\.mdf2\.45)$/i, "_edited$1");
+    const initial = mdfDoc.value.source.replace(/(\.mdf2\.\d+)$/i, "_edited$1");
     const p = await path("另存为 MDF", "save", initial);
     if (p)
       await run("导出 MDF 并重新校验…", async () => {

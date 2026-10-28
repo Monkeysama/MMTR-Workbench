@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { materialActions, terminalJob, type MaterialDraft } from "../src/materialBatch.ts";
+import { defaultVariantMaster, materialActions, terminalJob, variantMasterFor, type MaterialDraft } from "../src/materialBatch.ts";
 
 const parameter: MaterialDraft = { id: 1, action: "parameter", name: " P ", byteSize: 8,
   values: "1, -2.5", path: "" };
@@ -33,4 +33,12 @@ test("取消中仍在运行，成功/失败/过期才是终态", () => {
     assert.equal(terminalJob({ job_id: "test", state, stage: "", completed: 0, total: 0,
       elapsed_seconds: 0, error: null }), true);
   }
+});
+
+test("独立变体默认 master 随 MDF 游戏切换，不覆盖手动填写的值", () => {
+  assert.equal(defaultVariantMaster(), "MaterialShader/Variation/variant.mmtr");
+  assert.equal(defaultVariantMaster("RE4"), "_Chainsaw/MasterMaterial/Variation/variant.mmtr");
+  assert.equal(variantMasterFor("MaterialShader/Variation/variant.mmtr", "RE4"), defaultVariantMaster("RE4"));
+  assert.equal(variantMasterFor(defaultVariantMaster("RE4"), "MHWilds"), defaultVariantMaster("MHWilds"));
+  assert.equal(variantMasterFor("MaterialShader/Custom/a.mmtr", "RE4"), "MaterialShader/Custom/a.mmtr");
 });

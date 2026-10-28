@@ -1,7 +1,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from "vue";
 import { request as coreRequest, CoreRequestError } from "../api";
 import {
-  materialActions, terminalJob, type MaterialDraft, type MaterialJob, type MaterialPlan, type MaterialAction, type VariantOptions,
+  defaultVariantMaster, materialActions, terminalJob, variantMasterFor, type MaterialDraft, type MaterialJob, type MaterialPlan, type MaterialAction, type VariantOptions,
 } from "../materialBatch";
 
 /** 批量表单与后台短请求；轮询不重叠，网络重试保留同一请求键和原动作。 */
@@ -13,6 +13,7 @@ export function useMaterialBatch(options: {
   setBusy: (value: boolean) => void;
   committed: (plan: MaterialPlan) => Promise<void>;
   choosePath: (title: string, kind: "open" | "save", value?: string) => Promise<string | null>;
+  game: () => string | undefined;
 }) {
   const request = <T>(op: string, args: Record<string, unknown> = {}) =>
     coreRequest<T>(op, { ...args, document_id: options.documentId });
@@ -25,7 +26,7 @@ export function useMaterialBatch(options: {
   const pending = shallowRef<Record<string, unknown> | null>(null);
   const loading = shallowRef(false);
   const mode = shallowRef<"shared_master" | "independent_variant">("shared_master");
-  const variant = ref<VariantOptions>({ master: "MaterialShader/Variation/variant.mmtr", mmtr_path: "", mdf_path: "", overwrite: false });
+  const variant = ref<VariantOptions>({ master: defaultVariantMaster(options.game()), mmtr_path: "", mdf_path: "", overwrite: false });
   const notice = shallowRef("");
   const candidate = computed(() => !!job.value?.candidate_available);
   let planned: { actions: MaterialAction[]; record_index: number | undefined; dll: string; variant: VariantOptions | null } | null = null;
@@ -51,6 +52,7 @@ export function useMaterialBatch(options: {
     error.value = "";
     notice.value = "";
     pending.value = null;
+    variant.value.master = variantMasterFor(variant.value.master, options.game());
     add(action);
     visible.value = true;
   }
