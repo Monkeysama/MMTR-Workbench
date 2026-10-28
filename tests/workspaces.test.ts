@@ -210,3 +210,46 @@ test("刷新恢复未导出 revision 后仍显示脏标签", async t => {
   assert.equal(f.views.get("default")!.unsaved.value, true);
   assert.equal(f.workspace.tabs.value[0].dirty, true);
 });
+
+test("验证区分未执行与关联覆盖，MDF 或 DXC 变化立即撤销旧报告", async t => {
+  const f = await mount(); t.after(f.dispose);
+  await f.workspace.openFiles(["a.mmtr.240906211"]);
+  const view = f.views.get(f.workspace.activeId.value)!;
+  const globals = globalThis as any, original = globals.workspaceRpc;
+  let report = { status: "skipped", scope: "metadata_delta", valid: null,
+    checked_shaders: 0, checked_records: 0, metadata_edits: 0, issues: [] };
+  const requests: any[] = [];
+  globals.workspaceRpc = async (op: string, args: any) => {
+    if (op === "mmtr_validate_interfaces") { requests.push(args); return report; }
+    return original(op, args);
+  };
+  await view.validateMmtrInterfaces();
+  assert.equal(view.interfaceValidation.value?.state, "skipped");
+  assert.match(view.status.value, /未执行.*0 个 Shader/);
+  assert.equal(requests[0].scope, "metadata_delta");
+  report = { status: "passed", scope: "associated_layout", valid: true,
+    checked_shaders: 3, checked_records: 15, checked_markers: 3, metadata_edits: 0, issues: [] } as any;
+  await view.validateMmtrInterfaces("associated_layout");
+  assert.equal(view.interfaceValidation.value?.state, "passed");
+  assert.equal(view.interfaceValidation.value?.checkedMarkers, 3);
+  assert.match(view.status.value, /关联布局验证通过.*3 个 Shader、15 条记录/);
+  view.mdfDoc.value = { source: "changed.mdf2.45" } as any;
+  assert.equal(view.interfaceValidation.value, null);
+  report = { ...report, status: "failed", valid: false,
+    issues: [{ kind: "associated_layout", problem: "旧标记" }] } as any;
+  await view.validateMmtrInterfaces("associated_layout");
+  assert.equal(view.interfaceValidation.value?.state, "failed");
+  assert.match(view.status.value, /关联布局验证失败/);
+  view.dll.value = "other.dll";
+  assert.equal(view.interfaceValidation.value, null);
+  let finish!: (value: typeof report) => void;
+  const delayed = new Promise<typeof report>(resolve => { finish = resolve; });
+  globals.workspaceRpc = async (op: string, args: any) =>
+    op === "mmtr_validate_interfaces" ? delayed : original(op, args);
+  const pending = view.validateMmtrInterfaces("associated_layout");
+  view.dll.value = "new.dll";
+  finish(report);
+  await pending;
+  assert.equal(view.interfaceValidation.value, null);
+  assert.match(view.status.value, /输入已变化.*已丢弃/);
+});

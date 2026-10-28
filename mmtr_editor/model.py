@@ -431,8 +431,10 @@ class Document:
         仍必须由调用方先提供对应的编译结果，才能通过这里的闭环验证。
         """
         if not self.metadata_edits:
-            return {'valid': True, 'checked_shaders': 0, 'checked_records': 0,
-                    'issues': [], 'metadata_edits': 0}
+            return {'status': 'skipped', 'scope': 'metadata_delta', 'reason': 'no_metadata_edits',
+                    'valid': None, 'checked_shaders': 0, 'checked_records': 0,
+                    'issues': [], 'metadata_edits': 0,
+                    'coverage': {'associated_layout': False, 'material_markers': False}, 'game_tested': False}
         if not _in_worker:
             from .material_process import run_material_task
             key = self._validation_key(dll)
@@ -563,9 +565,11 @@ class Document:
                     if name in reflected_names:
                         issues.append({'kind': kind, 'record_index': record['index'],
                                        'name': name, 'problem': 'metadata 删除资源仍被关联 DXIL 声明'})
-        return {'valid': not issues, 'checked_shaders': len(reflections),
+        return {'status': 'failed' if issues else 'passed', 'scope': 'metadata_delta',
+                'valid': not issues, 'checked_shaders': len(reflections),
                 'checked_records': len(current['records']), 'issues': issues,
-                'metadata_edits': len(self.metadata_edits)}
+                'metadata_edits': len(self.metadata_edits),
+                'coverage': {'associated_layout': False, 'material_markers': False}, 'game_tested': False}
 
     def sync_compiled_interface(self, index: int, payload: bytes, dll: str | Path) -> dict:
         """应用一个显式编译结果，并暂存可安全推断的 metadata 新增。
@@ -795,9 +799,8 @@ class Document:
             }
 
         # 全量反射验证候选状态；失败时候选对象直接丢弃，调用方状态保持原样。
-        validation = candidate.validate_metadata_interfaces(dll) if metadata_operations else {
-            'valid': True, 'checked_shaders': 0, 'checked_records': 0, 'issues': [], 'metadata_edits': 0}
-        if not validation['valid']:
+        validation = candidate.validate_metadata_interfaces(dll)
+        if validation['valid'] is False:
             first = validation['issues'][0]
             detail = first.get('problem') or f"{first.get('kind')} {first.get('name', '')}"
             raise EditError(f'批量接口同步验证失败：{detail}')

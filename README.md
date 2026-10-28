@@ -14,6 +14,8 @@
 
 删除仅支持经过完整消费者证明的无作用接口，会同步已知关联 MDF，并在隔离 DXC 中重编译和重解析候选；验证通过不代表任意游戏版本或材质的渲染效果已通过。`emission_multiplier` 效果模板只提供显式 Shader 合同，必须先编译匹配 Shader。
 
+验证区分 metadata 修改与显式关联布局检查。没有 metadata 修改时报告“未执行”，不显示通过；关联布局检查会核对已打开 MDF 和逐 Shader 的有界读取、反射及布局标记，未知访问返回失败。范围和覆盖数量详见 [MCP 验证说明](docs/workbench-mcp.md#验证范围与覆盖)。
+
 ## 使用
 
 下载后解压运行 `MMTR Workbench.exe`，保留同目录的 `mmtr-core.exe`。在工具设置中配置自己的 Microsoft `dxcompiler.dll`；DLL 和游戏资产不随仓库提供。打开、浏览与原样另存不需要 DXC。

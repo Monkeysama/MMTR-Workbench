@@ -31,8 +31,6 @@ export function useWorkbench(options: {
   const interfaceValidation = shallowRef<InterfaceValidation | null>(null);
   const validatingInterfaces = shallowRef(false);
   const doc = shallowRef<DocumentInfo | null>(null);
-  // 文档快照替换后立即撤销旧报告，覆盖追加、删除、Shader 替换和重置路径。
-  watch(doc, () => { interfaceValidation.value = null; }, { flush: "sync" });
   const mdfDoc = shallowRef<MdfDocument | null>(null);
   const mdfSaving = shallowRef(false);
   const mdfEdits = serialEdits();
@@ -44,6 +42,8 @@ export function useWorkbench(options: {
   const ir = shallowRef("");
   const expert = shallowRef(false);
   const dll = shallowRef(localStorage.getItem("mmtr-dxc") ?? "");
+  // 任一验证输入变化后立即撤销旧报告，关联 MDF 修改也不能保留旧通过结论。
+  watch([doc, mdfDoc, dll], () => { interfaceValidation.value = null; }, { flush: "sync" });
   const initialSource: SourceInput = {
     source:
       "// 自备 HLSL 源代码；DXIL IR 不是原始 HLSL。\n// 编译后需保持资源、常量布局和输入输出兼容。\n",
@@ -511,34 +511,47 @@ export function useWorkbench(options: {
       status.value = `MMTR ${label} metadata 已暂存 · 请确认 Shader 字节码接口后另存 MMTR`;
     });
   }
-  // 通过后端 DXC 反射核对当前 metadata 与所有关联 Shader；验证失败不写入文件。
-  async function validateMmtrInterfaces() {
+  // 明确区分 metadata 修改检查与关联布局检查；两者均只读并展示实际覆盖数。
+  async function validateMmtrInterfaces(scope: InterfaceValidation["scope"] = "metadata_delta") {
     if (!doc.value || busy.value) return;
+    const inputs = [doc.value, mdfDoc.value, dll.value] as const;
     validatingInterfaces.value = true;
     interfaceValidation.value = null;
     try {
-      await run("用 DXC 反射验证 MMTR 接口…", async () => {
+      const label = scope === "associated_layout" ? "关联布局" : "metadata 修改";
+      await run(`验证${label}…`, async () => {
         const report = await request<{
-          valid: boolean;
+          status: InterfaceValidation["state"];
+          scope: InterfaceValidation["scope"];
           checked_shaders: number;
+          checked_records: number;
+          checked_markers?: number;
           metadata_edits: number;
           issues: InterfaceValidation["issues"];
-        }>("mmtr_validate_interfaces", { dll: dll.value });
+        }>("mmtr_validate_interfaces", { dll: dll.value, scope });
+        // 输入在只读请求期间也可能被更换，旧结果不能重新覆盖已撤销的报告。
+        if (doc.value !== inputs[0] || mdfDoc.value !== inputs[1] || dll.value !== inputs[2]) {
+          status.value = "验证输入已变化，结果已丢弃";
+          return;
+        }
         interfaceValidation.value = {
-          state: report.metadata_edits === 0 ? "clean" : report.valid ? "passed" : "failed",
+          state: report.status,
+          scope: report.scope,
           checkedShaders: report.checked_shaders,
+          checkedRecords: report.checked_records,
+          checkedMarkers: report.checked_markers ?? 0,
           metadataEdits: report.metadata_edits,
           issues: report.issues,
         };
-        if (report.metadata_edits === 0) {
-          status.value = "当前没有待验证的 MMTR metadata 修改";
+        if (report.status === "skipped") {
+          status.value = "未执行验证 · 没有 metadata 修改 · 检查 0 个 Shader";
           return;
         }
-        if (!report.valid) {
-          status.value = `Shader 接口验证失败 · ${report.issues.length} 项问题`;
+        if (report.status === "failed") {
+          status.value = `${label}验证失败 · 检查 ${report.checked_shaders} 个 Shader · ${report.issues.length} 项问题`;
           return;
         }
-        status.value = `Shader 接口验证通过 · 已检查 ${report.checked_shaders} 个 DXIL`;
+        status.value = `${label}验证通过 · 检查 ${report.checked_shaders} 个 Shader、${report.checked_records} 条记录`;
       });
     } finally { validatingInterfaces.value = false; }
   }

@@ -29,12 +29,15 @@ export interface Metadata {
   byteOffset: number | null;
   size: number | null;
 }
-// 当前文档的接口检查结果；重新加载或修改 MMTR 后必须失效。
+// 当前输入的接口检查结果；MMTR、MDF 或 DXC 改变后必须失效。
 export interface InterfaceValidation {
-  state: "passed" | "failed" | "clean";
+  state: "passed" | "failed" | "skipped";
+  scope: "metadata_delta" | "associated_layout";
   checkedShaders: number;
+  checkedRecords: number;
+  checkedMarkers: number;
   metadataEdits: number;
-  issues: Array<{ kind: string; shader_index?: number; record_index?: number; name?: string; problem?: string }>;
+  issues: Array<{ kind: string; shader_index?: number; record_index?: number; material_index?: number; name?: string; problem?: string }>;
 }
 export interface Integrity {
   name_records_checked: number;

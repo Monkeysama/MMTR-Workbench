@@ -62,11 +62,27 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_project_read`|对照当前已打开的源恢复工程意图，始终要求重新规划|
 |`workbench_set_master`|显式修改指定材质的 MMTR 相对路径，只影响该材质|
 |`workbench_edit_mdf`|一个事务内批量修改、增删 MDF 参数/纹理及修改设置/标记|
-|`workbench_validate`|DXIL/metadata/材质布局验证，分页返回问题|
+|`workbench_validate`|按显式 scope 验证 metadata 修改或关联布局，返回状态、覆盖数及分页问题|
 |`workbench_export`|预检目标后另存 MMTR、MDF 和 JSON 报告|
 |`workbench_reset`|丢弃 MMTR/MDF 内存编辑，恢复打开时原字节|
 
 工具 schema 包含完整参数和枚举。MDF 批量动作采用 `action` 区分类型：`set_property`、`set_property_components`、`add_property`、`delete_property`、`set_texture`、`add_texture`、`delete_texture`、`set_setting`、`set_flags`、`set_master`。每项明确指定 `material_index`；最多 100 项，整批失败则恢复全部内存修改。`set_setting` 支持 shader_type、shader_lod、bake_texture_array_size；master 使用专用 `workbench_set_master` 或批次 `set_master` 动作。
+
+### 验证范围与覆盖
+
+`workbench_validate` 默认 `scope="metadata_delta"`，只检查当前 metadata 修改。没有修改时返回 `status="skipped"`、`reason="no_metadata_edits"`、`valid=null`，检查 Shader 和记录数均为 0；它不表示完整文件、关联 MDF 或布局标记通过。仅替换 Shader 或重新打开文件后仍可能没有 metadata 修改。
+
+显式检查当前 MMTR 与已打开 MDF 的关联布局：
+
+```json
+{"scope":"associated_layout","offset":0,"limit":40}
+```
+
+此范围需要 DXC，严格重开两个内存快照，核对结构、名称／载荷哈希及当前 MDF 全部同 master 材质的属性、纹理、GPBF 和实际标量数，再在隔离进程逐 Shader 验证 DXIL、UserMaterial 反射、有界读取和原生纹理索引。已识别布局标记必须匹配 MDF 计数、地址及唯一比较消费者；旧比较值、未知读取或关联材质冲突返回 `status="failed"`。验证不修改或自动修补 Shader。
+
+报告的 `checked_shaders` 按 Shader 索引计数，`unique_payloads` 表示复用分析的载荷数量；`checked_records` 为已解析核对的记录数，`checked_materials` 为当前 MDF 的关联材质数。`passed_shaders/failed_shaders` 显示实际结果，`checked_markers` 为成功证明的标记数量。`coverage.complete` 只针对 `bounded_dxil_consumers` 范围，外部 MDF 使用者没有扫描，`game_tested` 始终为 false。预检失败时 Shader 覆盖数为 0，不应读成 Shader 已通过。
+
+界面的“验证 metadata 修改”和“验证关联布局”使用同一后端；输入 MMTR、MDF 或 DXC 改变会撤销旧报告。导出仍保留原有事务与 metadata 修改校验，显式关联验证不会被默认检查冒充或自动触发。
 
 ### 独立变体与工程
 

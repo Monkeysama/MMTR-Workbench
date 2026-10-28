@@ -14,6 +14,14 @@ def execute(request):
     document = restore_document(request['document'])
     if request['op'] == 'validate':
         return document.validate_metadata_interfaces(request['dll'], _in_worker=True)
+    if request['op'] == 'associated_layout':
+        from .dxil_assembly import DxilAssembly
+        from .material_validation import validate_material_layout
+        compiler = DxilAssembly(request['dll'])
+        try:
+            return validate_material_layout(document, request['material'], compiler)
+        finally:
+            compiler.close()
     if request['op'] == 'usage':
         # 只读统计：同一进程内复用一个反汇编器，结果不含文档状态。
         from .dxil_assembly import DxilAssembly

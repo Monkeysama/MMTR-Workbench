@@ -61,10 +61,32 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(template['actions'][0]['name'], 'MMTR_EmissionStrength')
         self.assertTrue(template['requires_compiled_shader'])
         self.assertTrue(tools['workbench_effect_preview'].annotations.read_only_hint)
+        self.assertTrue(tools['workbench_validate'].annotations.read_only_hint)
+        self.assertEqual(tools['workbench_validate'].input_schema['properties']['scope']['enum'],
+                         ['metadata_delta', 'associated_layout'])
         schema = tools['workbench_edit_mdf'].input_schema
         self.assertIn('discriminator', schema['properties']['actions']['items'])
         self.assertEqual(tools['workbench_list'].input_schema['properties']['limit']['maximum'], 100)
         self.assertEqual(tools['workbench_redirect'].input_schema['properties']['field']['type'], 'integer')
+
+    async def test_validation_scope_is_explicit_skips_without_delta_and_never_changes_revision(self):
+        from mmtr_editor.model import Document
+        self.state.service.doc = Document(mmtr_fixture(), MMTR_PATH)
+        before = self.state.service.doc.build()[0], self.state.service.mdf.build()[0], self.state.revision
+        report = await self.call('validate')
+        self.assertEqual((report['status'], report['scope'], report['checked_shaders']),
+                         ('skipped', 'metadata_delta', 0))
+        self.assertIsNone(report['valid'])
+        result = {'status': 'failed', 'scope': 'associated_layout', 'valid': False,
+                  'checked_shaders': 1, 'issues': [{'kind': 'associated_layout', 'problem': '旧标记'}]}
+        with patch('mmtr_editor.material_validation.validate_associated_layout', return_value=result) as validate:
+            report = await self.call('validate', scope='associated_layout')
+        self.assertEqual(report['scope'], 'associated_layout')
+        self.assertFalse(report['valid'])
+        validate.assert_called_once()
+        self.assertEqual((self.state.service.doc.build()[0], self.state.service.mdf.build()[0], self.state.revision), before)
+        with self.assertRaises(ToolError):
+            await self.call('validate', scope='everything')
 
     async def test_project_tools_keep_source_and_revision_and_restore_only_intent(self):
         from mmtr_editor.model import Document

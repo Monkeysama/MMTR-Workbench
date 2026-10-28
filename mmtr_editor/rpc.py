@@ -194,6 +194,12 @@ class Service:
         if op == 'mmtr_validate_interfaces':
             if self.doc is None:
                 raise EditError('请先打开 MMTR。')
+            scope = req.get('scope', 'metadata_delta')
+            if scope == 'associated_layout':
+                from .material_validation import validate_associated_layout
+                return validate_associated_layout(self.doc, self.mdf, str(req.get('dll', '')))
+            if scope != 'metadata_delta':
+                raise EditError('未知接口验证范围。')
             return self.doc.validate_metadata_interfaces(str(req.get('dll', '')))
         if op == 'mmtr_sync_compiled_interface':
             if self.doc is None:

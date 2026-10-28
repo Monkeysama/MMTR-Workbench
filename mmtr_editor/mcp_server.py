@@ -645,9 +645,13 @@ def create_server(session=None):
         return {'applied': len(actions), 'status': state.status()}
 
     @tool()
-    def workbench_validate(offset: Index = 0, limit: Limit = 40) -> dict[str, Any]:
-        """运行核心 DXIL/metadata/材质布局验证；问题列表分页。静态通过不代表游戏效果通过。"""
-        report = state.call('mmtr_validate_interfaces')
+    def workbench_validate(offset: Index = 0, limit: Limit = 40,
+                           scope: Literal['metadata_delta', 'associated_layout'] = 'metadata_delta') -> dict[str, Any]:
+        """只读验证，问题列表分页。默认只检查 metadata 修改；无修改返回 skipped/valid=null。
+        associated_layout 需关联 MDF 和 DXC，逐 Shader 检查有界读取、反射及材质标记；未知访问失败。
+        报告列出实际覆盖数量，不验证外部材质或游戏效果。
+        """
+        report = state.call('mmtr_validate_interfaces', scope=scope)
         return page_report(report, offset, limit)
 
     @tool(write=True, transaction=True, files=True)
