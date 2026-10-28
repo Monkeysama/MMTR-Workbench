@@ -115,7 +115,11 @@ class MaterialShardTests(unittest.TestCase):
                            '2'*64, '3'*64, self.info, set(), lambda *args: None, workers=2)
         self.assertEqual(before, self.document.build()[0])
         self.assertTrue(all(process.returncode == 0 for process in processes))
-        job.return_value.close.assert_called_once()
+        # Windows 回收 Job，POSIX 分支不会创建 Windows Job。
+        if os.name == 'nt':
+            job.return_value.close.assert_called_once()
+        else:
+            job.assert_not_called()
 
     def test_shard_protocol_requires_explicit_indices(self):
         request = {'protocol': 1, 'op': 'extend_shard', 'document': document_state(self.document)}

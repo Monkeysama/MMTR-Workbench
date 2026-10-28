@@ -78,8 +78,11 @@ class DxcTransportTests(unittest.TestCase):
     def test_compile_failure_invalidates_previous_compiled_payload(self):
         service=Service();service.compiled=b'old-success'
         error=DxcProcessError('fault',kind='crash',operation='compile',exit_code=73)
-        with patch('mmtr_editor.rpc.compile_hlsl',side_effect=error),self.assertRaises(DxcProcessError):
-            service.handle(dict(op='compile',dll=str(DLL),source='',entry='main',profile='ps_6_2'))
+        # 缓存前检使用临时 DLL 身份；原生编译已模拟，不依赖本机 DXC。
+        with tempfile.TemporaryDirectory() as temporary:
+            dll=Path(temporary)/'dxcompiler.dll';dll.write_bytes(b'synthetic DXC identity')
+            with patch('mmtr_editor.rpc.compile_hlsl',side_effect=error),self.assertRaises(DxcProcessError):
+                service.handle(dict(op='compile',dll=str(dll),source='',entry='main',profile='ps_6_2'))
         self.assertIsNone(service.compiled)
         with self.assertRaises(EditError):service.handle(dict(op='export_compiled',path='never-written.dxbc'))
         self.assertIsNone(service.handle(dict(op='snapshot')))
