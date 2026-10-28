@@ -150,6 +150,11 @@ def progress_writer(path):
             return
         pending = target.with_suffix('.pending')
         pending.write_text(json.dumps(dict(stage=stage, completed=completed, total=total)), encoding='utf-8')
-        os.replace(pending, target)
+        try:
+            os.replace(pending, target)
+        except PermissionError:
+            # Windows 读句柄可能短暂阻止替换。辅助进度可迟报，不能中断候选计算；
+            # 保留上次成功时间，下一次回调继续尝试，最终结果仍走独立主协议。
+            return
         previous[:] = stage, now
     return report
