@@ -130,7 +130,7 @@ def plan_material_edit(document, material, dll, actions, record_index=None, *, s
                 record = info['records'][i]
                 if len(record['metadata_tables']['srvs'])+len(textures) > 255 or record['per_stage_counts_raw']['srvs'][4]+len(textures) > 255:
                     raise EditError('SRV数量超出单字节范围。')
-    new = MaterialTailLayout(size, old.texture_names+tuple(t.name for t in textures), old.gpbf_names)
+    new = MaterialTailLayout(size, old.texture_names+tuple(t.name for t in textures), old.gpbf_names, old.header_bytes)
     if any(cb['member_count']+len(parameters) > 4096 for cb in info['metadata']['cbuffers'] if cb['name'] == 'UserMaterial'):
         raise EditError('UserMaterial成员数量超出已验证范围。')
     return MaterialEditPlan(hashlib.sha256(document.build()[0]).hexdigest(), source_revision, mdf_sha256,

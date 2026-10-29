@@ -126,7 +126,7 @@ def _add_cbuffer_member_bytes(data: bytes, cbuffer_name: str, member_name: str,
         struct.pack_into('<I', prefix, descriptor + 16, new_size)
         struct.pack_into('<I', prefix, descriptor + 20, entry['member_count'] + 1)
         struct.pack_into('<Q', prefix, descriptor + 24, member_offset)
-    struct.pack_into('<Q', prefix, 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['shader_start_field'], new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -209,7 +209,7 @@ def _add_table_resource_bytes(data: bytes, kind: str, record_index: int, resourc
         if old_pointer == table_offset:
             new_record_offset = candidate['offset'] + head_delta if candidate['offset'] >= insert_pos else candidate['offset']
             struct.pack_into('<B', prefix, new_record_offset + count_field, len(table_offsets) + 1)
-    struct.pack_into('<Q', prefix, 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['shader_start_field'], new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -252,14 +252,17 @@ class Document:
         try:
             _, self.info = inspect_data(self.original, self.source)
             groups = self.info['header_u16_04']
-            # 只放开各游戏已研究的组数（荒野四/五组，RE4 三组）；声明记录必须完整，不能接受兼容扫描的截断结果。
-            allowed = next(g for game, _size, g in FORMATS.values() if game == self.info['game'])
+            # 只放开各游戏已研究的组数（荒野四/五组，RE4 三组，鬼武者四组）；声明记录必须完整，不能接受兼容扫描的截断结果。
+            allowed = next(g for game, _size, g, _header in FORMATS.values() if game == self.info['game'])
             if (groups not in allowed or len(self.info['candidate_groups']) != groups
                     or self.info['record_count'] != groups * self.info['header_u16_06']
                     or any(not g['name_sequence_matches_first'] for g in self.info['candidate_groups'])):
-                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组）。')
+                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，鬼武者四组）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
+        # 材质读取按游戏换算标记行；同一进程同时只编辑一个游戏的模板。
+        from .material_addresses import set_material_header
+        set_material_header(self.info['material_header_bytes'])
         self.replacements: dict[int, bytes] = {}
         self.renames: dict[int, str] = {}
         self.redirects: dict[tuple[int, int], int] = {}
@@ -510,6 +513,8 @@ class Document:
             finally:
                 decoder.close()
         # UserMaterial 是 MDF 供值的核心接口，名称和偏移必须与每个使用它的 DXIL 完全一致。
+        added_members = {item['name'] for edit in extensions
+                         for item in (edit.get('parameters') or ([edit['parameter']] if edit.get('parameter') else []))}
         for cbuffer_name in changed_cbuffers:
             metadata_entry = next((entry for entry in current['metadata']['cbuffers']
                                    if entry['name'] == cbuffer_name), None)
@@ -524,7 +529,11 @@ class Document:
                     continue
                 actual = {variable['name'].removeprefix('VAR_'): variable['offset']
                           for variable in reflected['variables']}
-                if actual != expected or reflected['size'] != expected_size:
+                # 鬼武者原版反射省略未读取的成员；只放过缺少的原有成员，新增成员与全部偏移仍须一致。
+                partial = (cbuffer_name == 'UserMaterial' and actual != expected
+                           and all(expected.get(name) == offset for name, offset in actual.items())
+                           and not added_members - set(actual))
+                if (actual != expected and not partial) or reflected['size'] != expected_size:
                     issues.append({
                         'kind': 'cbuffer', 'shader_index': shader['index'],
                         'name': cbuffer_name, 'expected': expected,

@@ -243,7 +243,7 @@ def append_metadata(data, source, operation):
                 prefix[base+0xe8] += len(textures)
                 struct.pack_into('<I', prefix, base+0xd4, total+len(textures))
     delta = len(prefix)-info['shader_start']
-    struct.pack_into('<Q', prefix, 8, len(prefix))
+    struct.pack_into('<Q', prefix, info['shader_start_field'], len(prefix))
     for record in info['records']:
         for reference in record['shader_references']:
             struct.pack_into('<Q', prefix, record['offset']+reference['field'], reference['offset']+delta)
@@ -283,7 +283,7 @@ def current_layout(document, material, info=None):
                 raise EditError('关联MDF参数偏移/宽度与UserMaterial不一致。')
     if len(set(textures+gpbf)) != len(textures+gpbf):
         raise EditError('材质尾部资源名称重复，无法证明字段身份。')
-    return MaterialTailLayout(size, textures, gpbf)
+    return MaterialTailLayout(size, textures, gpbf, info.get('material_header_bytes', 0))
 
 
 # 选择所有使用当前材质纹理的共享表，闭合PS引用；不创建未知阶段或空表。

@@ -1,4 +1,4 @@
-"""Read-only SDF/MMTR inspection for the MH Wilds and RE4 shader families (see FORMATS).
+"""Read-only SDF/MMTR inspection for the MH Wilds, RE4 and Onimusha: Way of the Sword shader families (see FORMATS).
 
 The SDF record layout is inferred from shipped files, not an official schema.
 DXBC/DXIL structures are decoded independently and bounds checked.
@@ -20,9 +20,14 @@ import uuid
 STAGES = {0: "ps", 1: "vs", 2: "gs", 3: "hs", 4: "ds", 5: "cs", 6: "lib", 13: "ms", 14: "as"}
 RECORD_START = 0x10
 RECORD_SIZE = 0x110
-# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107
+# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数, 文件头长度)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107
 # 多出 8 字节（全部原版语料为零），其后的 compute 线程组与拓扑随之后移。
-FORMATS = {240906211: ("MHWilds", 0x110, (4, 5)), 221007879: ("RE4", 0x108, (3,))}
+# 鬼武者的记录同荒野，文件头在组内记录数之后多出 8 字节（各组记录数各一个 u16，补齐到 8 字节），Shader 区起点移到 +0x10。
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), 0x10), 221007879: ("RE4", 0x108, (3,), 0x10),
+           260605155: ("OnimushaWotS", 0x110, (4,), 0x18)}
+# 材质数据（BindlessBuffer 与 heap CBV）中 UserMaterial 之前的字节数。鬼武者第 0 行 lane 0 为模板 ID 标记，
+# 参数从第 1 行开始；荒野与 RE4 从第 0 行开始，标记在尾部之后。参数实例流与具名 UserMaterial 不含该行。
+MATERIAL_HEADER_BYTES = {"MHWilds": 0, "RE4": 0, "OnimushaWotS": 16}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -115,12 +120,12 @@ def inspect_data(data, path):
     """
     version = resource_version(path)
     if version in FORMATS:
-        game, record_size, _groups = FORMATS[version]
-        return _inspect_layout(data, path, game, record_size, version)
+        game, record_size, _groups, header_size = FORMATS[version]
+        return _inspect_layout(data, path, game, record_size, version, header_size)
     results, errors = [], []
-    for game, record_size, _groups in FORMATS.values():
+    for game, record_size, _groups, header_size in FORMATS.values():
         try:
-            results.append(_inspect_layout(data, path, game, record_size, version))
+            results.append(_inspect_layout(data, path, game, record_size, version, header_size))
         except ValueError as exc:
             errors.append(exc)
     if len(results) == 1:
@@ -130,11 +135,17 @@ def inspect_data(data, path):
     raise ValueError("SDF record size is ambiguous; add the resource version suffix to the file name")
 
 
-def _inspect_layout(data, path, game, record_size, version):
+def shader_start_field(header_size):
+    """Shader 区起点（u64）位于文件头最后 8 字节。"""
+    return header_size - 8
+
+
+def _inspect_layout(data, path, game, record_size, version, header_size=0x10):
     if data[:4] != b"SDF\0":
         raise ValueError("Not an SDF/MMTR file")
-    shader_start = u64(data, 8)
-    if not RECORD_START < shader_start < len(data):
+    record_start = header_size
+    shader_start = u64(data, shader_start_field(header_size))
+    if not record_start < shader_start < len(data):
         raise ValueError("Invalid shader region start")
     shaders = []
     offset = shader_start
@@ -155,7 +166,7 @@ def _inspect_layout(data, path, game, record_size, version):
         if position in metadata[kind]:
             return metadata[kind][position]
         width = TABLE_FIELDS[kind][2]
-        if position < RECORD_START or position + width > shader_start:
+        if position < record_start or position + width > shader_start:
             raise ValueError("Metadata descriptor outside metadata region")
         nameptr, namehash, reserved = unpack(data, "<QII", position)
         name = cstring(data, nameptr, shader_start)
@@ -165,7 +176,7 @@ def _inspect_layout(data, path, game, record_size, version):
                  "name_hash_raw": namehash, "reserved_raw": reserved}
         if kind == "cbuffers":
             size, count, memberptr = unpack(data, "<IIQ", position + 16)
-            if count > 4096 or (count and not RECORD_START <= memberptr < shader_start) or memberptr + count * 16 > shader_start:
+            if count > 4096 or (count and not record_start <= memberptr < shader_start) or memberptr + count * 16 > shader_start:
                 raise ValueError("Invalid constant buffer member table")
             members = []
             for i in range(count):
@@ -181,14 +192,21 @@ def _inspect_layout(data, path, game, record_size, version):
         return entry
 
     header04, header06 = unpack(data, "<HH", 4)
+    if header_size > 0x10:
+        # 多出的文件头按组列出记录数；只接受各组相同、其后补零的形态。
+        if 6 + header04 * 2 > shader_start_field(header_size):
+            raise ValueError("Group count table exceeds the file header")
+        group_counts = unpack(data, f"<{header04}H", 6)
+        if len(set(group_counts)) != 1 or any(data[6 + header04 * 2:shader_start_field(header_size)]):
+            raise ValueError("Per-group record counts differ or header padding is nonzero")
     declared_record_count = header04 * header06
     # 记录表由文件头的组数和组内记录数界定；其后的区域是 metadata/字符串，不能继续按记录扫描。
     record_limit = (declared_record_count
                     if declared_record_count
-                    and RECORD_START + declared_record_count * record_size <= shader_start
+                    and record_start + declared_record_count * record_size <= shader_start
                     else None)
     records = []
-    offset = RECORD_START
+    offset = record_start
     while (offset + record_size <= shader_start
            and (record_limit is None or len(records) < record_limit)):
         name_pointer = u64(data, offset)
@@ -252,7 +270,9 @@ def _inspect_layout(data, path, game, record_size, version):
         "magic": "SDF\\0", "header_u32_04": u32(data, 4),
         "header_u16_04": header04, "header_u16_06": header06, "candidate_groups": groups,
         "game": game, "resource_version": version,
-        "shader_start": shader_start, "record_start": RECORD_START, "record_size": record_size,
+        "shader_start": shader_start, "record_start": record_start, "header_size": header_size,
+        "shader_start_field": shader_start_field(header_size), "record_size": record_size,
+        "material_header_bytes": MATERIAL_HEADER_BYTES.get(game, 0),
         "record_end": offset, "record_count": len(records), "shader_count": len(shaders),
         "stages": dict(collections.Counter(s["stage"] for s in shaders)),
         "shader_models": dict(collections.Counter(s["shader_model"] for s in shaders)),
