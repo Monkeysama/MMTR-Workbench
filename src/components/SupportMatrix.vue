@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { ElButton, ElDialog, ElTag } from "element-plus";
 import { ShieldCheck } from "lucide-vue-next";
 import type { DocumentInfo } from "../types";
+import { gameName } from "../gameNames";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -13,7 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 const body = ref<HTMLElement | null>(null);
 
-/** 对话框内容会保留上一次滚动位置；每次打开回到当前文件与图例。 */
+/** 对话框内容会保留上一次滚动位置；每次打开回到当前文件与表格。 */
 function resetScroll() {
   if (body.value) body.value.scrollTop = 0;
 }
@@ -24,9 +25,7 @@ interface SupportRow {
   name: string;
   games: string[];
   versions: number[];
-  format: string;
   mdf: string;
-  capability: string;
   evidence: Evidence;
   note: string;
 }
@@ -41,39 +40,32 @@ const evidence: Record<Evidence, { label: string; type: "success" | "warning" | 
 };
 
 const rows: SupportRow[] = [
-  { id: "mhwilds", name: "MH Wilds", games: ["MHWilds"], versions: [240906211],
-    format: "240906211 · 0x110 · 4/5 组", mdf: "2.45", capability: "MMTR / MDF 编辑",
+  { id: "mhwilds", name: "Monster Hunter Wilds", games: ["MHWilds"], versions: [240906211], mdf: "2.45",
     evidence: "game", note: "真实语料与游戏内验证" },
-  { id: "re4", name: "RE4", games: ["RE4"], versions: [221007879],
-    format: "221007879 · 0x108 · 3 组", mdf: "2.32", capability: "MMTR / MDF 编辑",
+  { id: "re4", name: "Resident Evil 4", games: ["RE4"], versions: [221007879], mdf: "2.32",
     evidence: "existing", note: "v0.4.2 既有范围，本轮未重验" },
-  { id: "onimusha", name: "鬼武者 WotS / Demo", games: ["ONIMUSHAWOTS", "ONIMUSHAWOTSDEMO"], versions: [260605155, 251112814],
-    format: "260605155 / 251112814 · 0x110 · per-target", mdf: "2.51 · 104 字节材质项", capability: "MMTR / MDF 编辑、增删、Shader 替换",
-    evidence: "author", note: "作者报告 550 个 MMTR、33 个 MDF 通过" },
-  { id: "mhrise", name: "MHRISE", games: ["MHRISE"], versions: [220427553],
-    format: "220427553 · 0x108 · 3 组", mdf: "2.23", capability: "MMTR / MDF 编辑",
+  { id: "onimusha", name: "Onimusha: Way of the Sword", games: ["ONIMUSHAWOTS", "ONIMUSHAWOTSDEMO"], versions: [260605155, 251112814], mdf: "2.51",
+    evidence: "author", note: "作者报告 550 个 MMTR、33 个 MDF 通过；含 Demo" },
+  { id: "mhrise", name: "Monster Hunter Rise", games: ["MHRISE"], versions: [220427553], mdf: "2.23",
     evidence: "corpus", note: "3 个真实 MMTR 与提取 MDF；未进游戏" },
-  { id: "re8", name: "RE8", games: ["RE8"], versions: [2102188797],
-    format: "2102188797 · 0x108 · 5 组", mdf: "2.19", capability: "MMTR / MDF 编辑",
+  { id: "re8", name: "Resident Evil Village", games: ["RE8"], versions: [2102188797], mdf: "2.19",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "re2rt", name: "RE2 RT", games: ["RE2RT"], versions: [2109101635],
-    format: "2109101635 · 0x108 · 5 组", mdf: "2.21", capability: "MMTR / MDF 编辑",
+  { id: "re2rt", name: "Resident Evil 2 (Ray Tracing)", games: ["RE2RT"], versions: [2109101635], mdf: "2.21",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "re2", name: "RE2", games: ["RE2"], versions: [1808160001],
-    format: "1808160001 · 0x108 · 4 组", mdf: "2.10", capability: "MMTR / MDF 编辑",
+  { id: "re2", name: "Resident Evil 2", games: ["RE2"], versions: [1808160001], mdf: "2.10",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "re3", name: "RE3", games: ["RE3"], versions: [1905100741],
-    format: "1905100741 · 0x108 · 4 组", mdf: "2.13", capability: "MMTR / MDF 编辑",
+  { id: "re3", name: "Resident Evil 3", games: ["RE3"], versions: [1905100741], mdf: "2.13",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "sf6", name: "SF6", games: ["SF6"], versions: [221102761, 250109895],
-    format: "221102761 / 250109895 · 0x108 · 3 组", mdf: "2.31", capability: "MMTR / MDF 编辑",
+  { id: "sf6", name: "Street Fighter 6", games: ["SF6"], versions: [221102761, 250109895], mdf: "2.31",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "dd2-old", name: "DD2 旧版", games: ["DD2"], versions: [240112003, 240423143],
-    format: "240112003 / 240423143 · 0x108 · 3 组", mdf: "未登记", capability: "仅 MMTR",
+  { id: "dd2-old", name: "Dragon's Dogma 2 (legacy)", games: ["DD2"], versions: [240112003, 240423143], mdf: "—",
     evidence: "synthetic", note: "MDF 未开放" },
-  { id: "dd2-current", name: "RE9 / Pragmata / DD2 当前版", games: ["RE9", "PRAGMATA", "DD2"], versions: [251112994, 251112995, 260511270],
-    format: "251112994 / 251112995 / 260511270 · 0x110 · per-target", mdf: "2.51 未单独验证", capability: "仅 MMTR",
-    evidence: "mmtr", note: "MDF 2.51 目前按鬼武者布局登记" },
+  { id: "re9", name: "Resident Evil Requiem", games: ["RE9"], versions: [251112994], mdf: "2.51",
+    evidence: "mmtr", note: "MDF 2.51 未单独验证" },
+  { id: "pragmata", name: "Pragmata", games: ["PRAGMATA"], versions: [251112995], mdf: "2.51",
+    evidence: "mmtr", note: "MDF 2.51 未单独验证" },
+  { id: "dd2-current", name: "Dragon's Dogma 2 (current)", games: ["DD2"], versions: [260511270], mdf: "2.51",
+    evidence: "mmtr", note: "MDF 2.51 未单独验证" },
 ];
 
 const currentRow = computed(() => {
@@ -96,13 +88,13 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
     @opened="resetScroll"
   >
     <template #header>
-      <div class="support-title"><ShieldCheck :size="22" /><div><h2>支持范围</h2><p>MMTR 与 MDF 的已登记格式、可编辑能力与证据等级</p></div></div>
+      <div class="support-title"><ShieldCheck :size="22" /><div><h2>支持范围</h2><p>MMTR 与 MDF 的已登记版本</p></div></div>
     </template>
 
     <div ref="body" class="support-body">
       <section v-if="doc" class="support-current">
         <div class="support-current-head">
-          <div><span class="support-kicker">当前文件</span><strong>{{ doc.game }} · {{ doc.resource_version }}</strong></div>
+          <div><span class="support-kicker">当前文件</span><strong>{{ gameName(doc.game) }} · {{ doc.resource_version }}</strong></div>
           <ElTag :type="currentEvidence?.type ?? 'info'" effect="plain">{{ currentEvidence?.label ?? "未登记版本" }}</ElTag>
         </div>
         <div class="support-current-grid">
@@ -111,32 +103,27 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
           <div><small>运行时缓存键</small><b>{{ doc.runtime_cache_keys ? "8 字节" : "无" }}</b></div>
           <div v-if="doc.material_header_bytes"><small>材质头</small><b>{{ doc.material_header_bytes }} 字节</b></div>
         </div>
-        <p v-if="mdfLabel" class="support-mdf">{{ mdfLabel }}<span v-if="mdfGame"> · {{ mdfGame }}</span><span v-if="mdfVersion === 51" class="support-warn"> · 2.51 仅鬼武者布局经过验证</span></p>
+        <p v-if="mdfLabel" class="support-mdf">{{ mdfLabel }}<span v-if="mdfGame"> · {{ gameName(mdfGame) }}</span><span v-if="mdfVersion === 51" class="support-warn"> · 2.51 仅 Onimusha 布局经过验证</span></p>
         <p v-if="currentRow" class="support-current-note">{{ currentRow.note }}</p>
       </section>
-      <p v-else class="support-empty">打开 MMTR 文件后，这里会显示当前文件的格式与证据等级。</p>
+      <p v-else class="support-empty">打开 MMTR 文件后，这里会显示当前文件的格式版本。</p>
 
-      <div class="support-legend">
-        <span v-for="item in evidence" :key="item.label" class="support-legend-item"><i :class="`dot dot-${item.type}`" />{{ item.label }}</span>
-      </div>
-      <p class="support-intro">“支持”指工具能按已知布局解析并编辑；它不等于该游戏、材质或 Shader 组合已在游戏内加载通过。未知布局会拒绝操作。</p>
+      <p class="support-intro">“支持”指工具能按已知布局解析并编辑；它不等于该游戏、材质或 Shader 组合已在游戏内加载通过。表中只列已登记版本，“—”表示该栏未开放。</p>
 
       <div class="support-table-wrap">
         <table class="support-table">
-          <thead><tr><th>游戏</th><th>MMTR 格式</th><th>MDF</th><th>能力</th><th>证据</th></tr></thead>
+          <thead><tr><th>游戏</th><th>MMTR 版本</th><th>MDF 版本</th></tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.id" :class="{ 'is-current': currentRow?.id === row.id }">
               <td><b>{{ row.name }}</b><small v-if="currentRow?.id === row.id">当前</small></td>
-              <td class="mono">{{ row.format }}</td>
-              <td>{{ row.mdf }}</td>
-              <td>{{ row.capability }}</td>
-              <td><ElTag :type="evidence[row.evidence].type" effect="plain">{{ evidence[row.evidence].label }}</ElTag><small class="support-row-note">{{ row.note }}</small></td>
+              <td class="mono">{{ row.versions.join(" / ") }}</td>
+              <td class="mono">{{ row.mdf }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <p class="support-footnote">MDF 2.51 目前统一按鬼武者的 104 字节材质项解析；RE9、Pragmata、DD2 当前版没有单独的真实语料验证。编辑前请保留原文件备份。</p>
+      <p class="support-footnote">MDF 2.51 目前统一按 Onimusha: Way of the Sword 的 104 字节材质项解析；Resident Evil Requiem、Pragmata、Dragon's Dogma 2 (current) 未单独验证。编辑前请保留原文件备份。</p>
     </div>
     <template #footer><ElButton @click="emit('update:modelValue', false)">关闭</ElButton></template>
   </ElDialog>
@@ -158,22 +145,16 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 .support-mdf, .support-current-note { margin: 12px 0 0; color: #526174; font-size: 13px; line-height: 1.7; }
 .support-warn { color: #a15c00; }
 .support-empty { color: #697588; font-size: 14px; margin: 0 0 14px; }
-.support-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 0 2px; color: #526174; font-size: 13px; }
-.support-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-.dot-success { background: #3567c8; }
-.dot-warning { background: #c77b16; }
-.dot-info { background: #8b95a5; }
 .support-intro { color: #697588; font-size: 13px; line-height: 1.8; margin: 8px 0 14px; }
 .support-table-wrap { border: 1px solid #e1e5eb; border-radius: 6px; overflow-x: auto; }
-.support-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px; }
+.support-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
 .support-table th { text-align: left; font-weight: 600; color: #526174; background: #f5f6f8; padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
 .support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid #edf0f4; color: #30343b; line-height: 1.6; }
+.support-table td.mono { white-space: nowrap; }
 .support-table tr:last-child td { border-bottom: 0; }
 .support-table tr.is-current td { background: #edf2fc; }
 .support-table td:first-child b { display: block; font-weight: 600; }
 .support-table td:first-child small { color: #3567c8; font-size: 12px; }
-.support-row-note { display: block; color: #718097; font-size: 12px; line-height: 1.5; margin-top: 4px; max-width: 170px; }
 .support-footnote { color: #718097; font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
 .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 @media (max-width: 720px) {

@@ -40,6 +40,7 @@ import MdfPanel from "./MdfPanel.vue";
 import FileDialog from "./FileDialog.vue";
 import ToolSettings from "./ToolSettings.vue";
 import SupportMatrix from "./SupportMatrix.vue";
+import { gameName } from "../gameNames";
 import MaterialBatchDialog from "./material/MaterialBatchDialog.vue";
 import DocumentTabs from "./DocumentTabs.vue";
 const props = defineProps<{ documentId: string; tabs: DocumentTab[]; active: boolean; workspaceBusy: boolean }>();
@@ -137,7 +138,7 @@ function navigate(id: string) {
               }}</b>
             </div>
             <div class="sidebar-filemeta">
-              {{ doc.game }} · {{ doc.resource_version }}<br />{{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
+              {{ gameName(doc.game) }} · {{ doc.resource_version }}<br />{{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
             </div>
             <ElTag :type="doc.dirty ? 'warning' : 'info'" effect="plain">{{
               doc.dirty

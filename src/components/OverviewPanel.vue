@@ -18,6 +18,7 @@ import {
   ArrowUpRight,
 } from "lucide-vue-next";
 import { bytes, type DocumentInfo } from "../types";
+import { gameName } from "../gameNames";
 const props = defineProps<{ doc: DocumentInfo; integrityOk: boolean }>();
 const emit = defineEmits<{
   navigate: [tab: "passes" | "shaders" | "metadata"];
@@ -100,7 +101,7 @@ const groups = computed(() =>
             bytes(doc.size)
           }}</ElDescriptionsItem>
           <ElDescriptionsItem label="游戏 / 资源版本"
-            ><span class="mono">{{ doc.game }}</span> ·
+            ><span class="mono">{{ gameName(doc.game) }}</span> ·
             {{ doc.resource_version }}</ElDescriptionsItem
           >
           <ElDescriptionsItem label="通道记录"
