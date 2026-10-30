@@ -6,7 +6,8 @@ import unittest
 
 from inspect_mmtr import inspect_data
 from mmtr_editor.hashes import xxh64
-from mmtr_editor.material_addresses import material_reads
+from mmtr_editor.material_addresses import material_header, material_reads, set_material_header
+from mmtr_editor.material_extension import current_layout
 from mmtr_editor.mdf import MdfDocument, MdfError
 from mmtr_editor.model import Document, EditError
 from mmtr_editor.structure import document_structure, parse_structure
@@ -53,6 +54,27 @@ class Re4MmtrTests(unittest.TestCase):
                 self.assertEqual(inspect_data(fixture(), Path(name))[1]['record_size'], 0x110)
         with self.assertRaises(ValueError):
             inspect_data(b'SDF\0' + bytes(60), Path('synthetic.mmtr'))
+
+    def test_unversioned_game_identity_uses_layout_and_group_count_without_guessing(self):
+        self.addCleanup(set_material_header, material_header())
+        cases = (
+            (re4_fixture(), 'Unknown'),  # RE4、SF6 和旧版 DD2 共用三组布局。
+            (fixture(3, record_size=0x108, runtime_cache_keys=False), 'MHRISE'),
+            (fixture(4, record_size=0x108, runtime_cache_keys=False), 'Unknown'),  # RE2 / RE3
+            (fixture(5, record_size=0x108, runtime_cache_keys=False), 'Unknown'),  # RE8 / RE2RT
+            (fixture(), 'MHWilds'),
+        )
+        material = {'textures': [{'name': 'BaseMap'}], 'gpbf': [], 'property_block_size': 16,
+                    'properties': [{'name': 'Value', 'offset': 0, 'byte_size': 4}]}
+        for data, expected_game in cases:
+            for path in (Path('synthetic.mmtr'), Path('synthetic.mmtr.999999999')):
+                with self.subTest(game=expected_game, path=path, size=len(data)):
+                    doc = Document(data, path)
+                    self.assertEqual((doc.info['game'], doc.info['material_header_bytes']), (expected_game, 0))
+                    self.assertEqual(current_layout(doc, material).header_bytes, 0)
+                    self.assertEqual(doc.build()[0], data)
+                    doc.add_cbuffer_member('UserMaterial', 'Added', 4, 16)
+                    self.assertTrue(doc.metadata_edits)
 
     def test_group_counts_are_checked_per_game(self):
         Document(re4_fixture(3), RE4_PATH)

@@ -148,13 +148,14 @@ def inspect_data(data, path):
     if len(results) == 1:
         raw, info = results[0]
         key = (info['record_size'], info['runtime_cache_keys'], info['header_layout'])
-        headers = {MATERIAL_HEADER_BYTES.get(game, 0)
-                   for game, size, _groups, keys, layout in FORMATS.values()
-                   if (size, keys, layout) == key}
-        if len(headers) > 1:
-            # 同一结构可属于不同材质头；保留浏览和结构编辑，不猜游戏或地址语义。
-            info['game'] = 'Unknown'
-            info['material_header_bytes'] = None
+        candidates = [(game, groups) for game, size, groups, keys, layout in FORMATS.values()
+                      if (size, keys, layout) == key]
+        matching = [(game, groups) for game, groups in candidates if info['header_u16_04'] in groups]
+        games = {game for game, _groups in matching or candidates}
+        headers = {MATERIAL_HEADER_BYTES.get(game, 0) for game in games}
+        # 游戏和材质头分别判断：同头不同游戏仍可编辑，但不能声称确定游戏身份。
+        info['game'] = next(iter(games)) if len(games) == 1 else 'Unknown'
+        info['material_header_bytes'] = next(iter(headers)) if len(headers) == 1 else None
         return raw, info
     if not results:
         raise errors[0]
