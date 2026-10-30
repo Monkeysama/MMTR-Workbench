@@ -1,12 +1,12 @@
 # MMTR Workbench
 
-用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。支持怪物猎人荒野与 RE4（BIOHAZARD RE:4），RE4 的差异与验证范围见 [RE4 支持](docs/re4-support.md)。
+用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。支持怪物猎人荒野、RE4（BIOHAZARD RE:4）与鬼武者（Onimusha: Way of the Sword），差异与验证范围见 [RE4 支持](docs/re4-support.md)、[鬼武者支持](docs/oniwots-support.md)。
 
 ## 功能
 
-- 浏览完整同名序列 MMTR（荒野四组或五组，RE4 三组）的渲染通道、Shader、常量缓冲和资源，支持带数字版本后缀的文件。
+- 浏览完整同名序列 MMTR（荒野四组或五组，RE4 三组，鬼武者四组）的渲染通道、Shader、常量缓冲和资源，支持带数字版本后缀的文件。
 - 查看 DXIL 反汇编和可读伪代码，在已支持范围内重建 HLSL、编译与替换 Shader。
-- 编辑 MDF2.45（荒野）与 MDF2.32（RE4）的材质参数、纹理路径和设置，增删参数/贴图槽，按 MMTR 路径筛选关联材质。
+- 编辑 MDF2.45（荒野）、MDF2.32（RE4）与 MDF2.51（鬼武者）的材质参数、纹理路径和设置，增删参数/贴图槽，按 MMTR 路径筛选关联材质。
 - 新增 UserMaterial 尾部参数或 Texture2D 接口，迁移已识别的材质寻址、布局和关联资源表，并验证后另存。
 - 通过 **34 个 MCP 工具**执行查询、后台混合批量追加、独立变体、材质工程、读取统计、有界删除、效果模板预检和受保护导出；每个 MCP 进程独立持有文档。
 

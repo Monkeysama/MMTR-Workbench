@@ -187,7 +187,7 @@ def remove_metadata(data, source, operation):
         total = sum(sum(values) for kind, values in record['per_stage_counts_raw'].items() if kind != 'srvs')+sum(counts)
         struct.pack_into('<I', prefix, base+0xD4, total)
     delta = len(prefix)-info['shader_start']
-    struct.pack_into('<Q', prefix, 8, len(prefix))
+    struct.pack_into('<Q', prefix, info['shader_start_field'], len(prefix))
     for record in info['records']:
         for reference in record['shader_references']:
             struct.pack_into('<Q', prefix, record['offset']+reference['field'], reference['offset']+delta)

@@ -31,7 +31,8 @@ class RemovalEditPlan:
     def new(self):
         from .material_addresses import MaterialTailLayout
         value = self.preview['layout']['new']
-        return MaterialTailLayout(value['parameter_bytes'], tuple(value['texture_names']), tuple(value['gpbf_names']))
+        return MaterialTailLayout(value['parameter_bytes'], tuple(value['texture_names']), tuple(value['gpbf_names']),
+                                  value.get('header_bytes', 0))
 
     def report(self):
         return copy.deepcopy(self.preview)
@@ -118,7 +119,8 @@ def apply_material_removal(service, dll, actions, material_index=None, revision=
         raise EditError('隔离进程返回不同删除布局。')
     reopened_doc = Document(candidate_doc.build()[0], candidate_doc.source)
     expected = plan['layout']['new']
-    expected = MaterialTailLayout(expected['parameter_bytes'], tuple(expected['texture_names']), tuple(expected['gpbf_names']))
+    expected = MaterialTailLayout(expected['parameter_bytes'], tuple(expected['texture_names']), tuple(expected['gpbf_names']),
+                                  expected.get('header_bytes', 0))
     for index in plan['target_materials']:
         actual = reopened_mdf.material(index)
         if current_layout(reopened_doc, actual) != expected:

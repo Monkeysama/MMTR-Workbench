@@ -1,4 +1,4 @@
-"""SDF Program（荒野 0x110、RE4 0x108）的只读结构与绑定索引，无 UI/DXC 或写入能力。
+"""SDF Program（荒野与鬼武者 0x110、RE4 0x108）的只读结构与绑定索引，无 UI/DXC 或写入能力。
 
 字段参考 REasy 0eb38af 的公开格式定义，独立实现；保留原字节与未知值。
 旧 inspect_data 仍是兼容解析入口，新解释的问题只进入诊断，不改变其浏览行为。
@@ -401,7 +401,7 @@ def parse_structure(data, path, info=None):
         cursor = max(cursor, obj.offset+obj.size)
     if cursor < upper:
         unmodeled.append((cursor, upper-cursor))
-    header = Header(data[:16], info['header_u16_04'], info['header_u16_06'], upper, lower, version)
+    header = Header(data[:info['header_size']], info['header_u16_04'], info['header_u16_06'], upper, lower, version)
     return Structure(identity, data, header, tuple(programs), raw_objects, metadata,
                      tuple(tuple(rows) for rows in shader_users), tuple(diagnostics), tuple(unmodeled))
 

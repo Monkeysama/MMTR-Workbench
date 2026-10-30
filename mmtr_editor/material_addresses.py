@@ -15,6 +15,8 @@ class MaterialTailLayout:
     parameter_bytes: int
     texture_names: tuple[str, ...]
     gpbf_names: tuple[str, ...]
+    # 材质数据中参数区之前的标记行（鬼武者 16，其余 0）；读取偏移已按参数区起点换算，标记读取为负偏移。
+    header_bytes: int = 0
 
     def fields(self):
         return {name: self.parameter_bytes + index * 4
@@ -33,6 +35,21 @@ class MaterialTailLayout:
 
 
 _RAW = r'call %dx.types.ResRet.i32 @dx.op.rawBufferLoad.i32\(i32 139, %dx.types.Handle (%\w+), i32 (%\w+), i32 (\d+), i8 \d+, i32 4\)'
+
+# 材质数据中参数区之前的字节数，按打开的 MMTR 所属游戏设置（Document 打开时调用 set_material_header）。
+# 只作用于 BindlessBuffer 与 heap CBV 读取；参数实例流与具名 UserMaterial 不含该行。
+_MATERIAL_HEADER_BYTES = 0
+
+
+def set_material_header(header_bytes):
+    global _MATERIAL_HEADER_BYTES
+    if header_bytes not in (0, 16):
+        raise ValueError('材质数据标记行只支持 0 或 16 字节。')
+    _MATERIAL_HEADER_BYTES = header_bytes
+
+
+def material_header():
+    return _MATERIAL_HEADER_BYTES
 
 
 # RE4 的可见性缓冲/网格变体经 Instances 读取 BindlessBuffer 中的网格表，不是材质参数：
@@ -73,6 +90,21 @@ def _mesh_table_reads(definitions, origins):
         pick = re.fullmatch(r'select i1 %\w+, i32 (%\w+), i32 (%\w+)', text(value))
         return bool(pick and from_mesh(pick[1]) and from_mesh(pick[2]))
 
+    # 鬼武者：地址（字节）= ((((X >> 16) & 255) + 1) >> 1) << 4 + Instances[i].字节52，再 >> 4 为行；
+    # 读出的 lane 是材质数据地址，其后的读取是材质读取，不做链式排除。
+    oni = set()
+    for value, load in loads.items():
+        row = re.fullmatch(r'lshr i32 (%\w+), 4', text(load[2]))
+        add = row and re.fullmatch(r'add(?: nuw)?(?: nsw)? i32 (%\w+), (%\w+)', text(row[1]))
+        if not add:
+            continue
+        for a, b in ((add[1], add[2]), (add[2], add[1])):
+            shift = re.fullmatch(r'shl(?: nuw)?(?: nsw)? i32 (%\w+), 4', text(a))
+            lane = re.fullmatch(r'extractvalue %dx.types.ResRet.i32 (%\w+), 0', text(b))
+            inst = lane and re.fullmatch(_RAW, text(lane[1]))
+            if shift and mesh_row(shift[1]) and inst and buffer(inst[1]) == 'Instances' and inst[3] == '52':
+                oni.add(value)
+
     changed = bool(result)
     while changed:
         changed = False
@@ -84,11 +116,12 @@ def _mesh_table_reads(definitions, origins):
             if base and from_mesh(base[1]):
                 result.add(value)
                 changed = True
-    return result
+    return result | oni
 
 
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
-def material_reads(ir, *, include_static=False, graph=None):
+def material_reads(ir, *, include_static=False, graph=None, header_bytes=None):
+    header = material_header() if header_bytes is None else header_bytes
     graph = ensure_graph(ir, graph)
     definitions, uses = graph.definitions, graph.uses
     origins = handle_sources(ir, definitions)
@@ -172,7 +205,10 @@ def material_reads(ir, *, include_static=False, graph=None):
             ex = re.fullmatch(r'extractvalue %dx.types.' + re.escape(aggregate) + ' ' + re.escape(value) + r', ([0-3])', user['text'])
             if not ex:
                 raise ValueError(f'材质aggregate有未支持的消费者：{user["text"]}')
-            extracts.append({'ssa': user['value'], 'lane': int(ex[1]), 'offset': register * 16 + int(ex[1]) * 4})
+            # 材质数据的标记行之后才是参数区；参数实例流与具名 UserMaterial 不含标记行。
+            shift = header if kind in ('raw', 'cb') else 0
+            extracts.append({'ssa': user['value'], 'lane': int(ex[1]),
+                             'offset': register * 16 + int(ex[1]) * 4 - shift})
         result.append({'ssa': value, 'text': text, 'kind': kind, 'register': register,
                        'base': base, 'stride': stride,
                        'address_ssa': raw[1] if raw and not raw[1].isdigit() else None,
@@ -250,6 +286,8 @@ def relocate_material_reads(ir, old, new, *, reads=None, relocation=None, graph=
             continue
         groups = sorted({target // 16 for _, target in wanted.values()})
         additions, group_names = [], {}
+        # 偏移以参数区为起点；写回材质数据地址时加回标记行。
+        row_shift = material_header() // 16 if read['kind'] in ('raw', 'cb') else 0
         for reg in groups:
             stem = f'%mmtrReloc{read["ssa"][1:]}r{reg}'
             name, suffix = stem, 0
@@ -259,12 +297,12 @@ def relocate_material_reads(ir, old, new, *, reads=None, relocation=None, graph=
             used_names.update((name, name + 'addr'))
             group_names[reg] = name
             if read['kind'] in ('cb', 'static'):
-                text = re.sub(r'i32 \d+\)$', f'i32 {reg})', read['text'])
+                text = re.sub(r'i32 \d+\)$', f'i32 {reg + row_shift})', read['text'])
             elif read['kind'] == 'instance' and read['stride'] is None:
                 text = read['text'].replace(f'i32 {read["raw"][0]},', f'i32 {reg*16},')
             else:
                 address = name + 'addr'
-                additions.append(f'  {address} = add i32 {read["base"]}, {reg*16 if read["kind"] == "instance" else reg}')
+                additions.append(f'  {address} = add i32 {read["base"]}, {reg*16 if read["kind"] == "instance" else reg + row_shift}')
                 text = read['text'].replace(f'i32 {read["raw"][0]},', f'i32 {address},')
             additions.append(f'  {name} = {text}')
         line_index, line = anchor(read['ssa'])

@@ -1,4 +1,4 @@
-"""Byte-preserving MDF 2.45 (MH Wilds) / 2.32 (RE4) reader and MDF/MMTR binding diagnostics.
+"""Byte-preserving MDF 2.45 (MH Wilds) / 2.32 (RE4) / 2.51 (Onimusha: Way of the Sword) reader and MDF/MMTR binding diagnostics.
 
 The Blender add-on supplied the format reference, but this module deliberately
 keeps the editor independent from Blender and does not implement a full
@@ -22,7 +22,17 @@ class MdfError(ValueError):
 
 # MDF 版本 → (游戏, master 根目录)。2.32 与 2.45 的材质项（100 字节）、属性头与纹理头布局相同；
 # RE4 原版材质没有 MMTRS 表（指针为 0）。只登记有原版语料核对的版本。
-MDF_VERSIONS = {45: ('MHWilds', 'MaterialShader/'), 32: ('RE4', '_Chainsaw/MasterMaterial/')}
+# 鬼武者（Onimusha: Way of the Sword）的 2.51 材质项为 104 字节：属性数之后多一个 int（属性数据末端的 float 数，
+# 不含末尾对齐），其后各字段后移 4 字节。RE9 等同为 2.51 的其他布局未登记。
+MDF_VERSIONS = {45: ('MHWilds', 'MaterialShader/'), 32: ('RE4', '_Chainsaw/MasterMaterial/'),
+                51: ('OnimushaWotS', 'MaterialShader/')}
+_FIELDS_100 = {'size': 100, 'name': 0, 'name_hash': 8, 'block_size': 12, 'property_count': 16,
+               'float_count': None, 'texture_count': 20, 'gpbf_name_count': 24, 'gpbf_path_count': 28,
+               'bake_size': 32, 'shader_type': 36, 'flags': 40, 'shader_lod': 48, 'property_headers': 52,
+               'texture_headers': 60, 'gpbf': 68, 'property_data': 76, 'master': 84, 'mmtrs': 92}
+MATERIAL_FIELDS = {45: _FIELDS_100, 32: _FIELDS_100,
+                   51: {'size': 104, 'float_count': 20,
+                        **{k: v + (4 if v > 16 else 0) for k, v in _FIELDS_100.items() if k not in ('size', 'float_count')}}}
 
 
 def master_root_ok(path: str, version: int | None = None) -> bool:
@@ -104,14 +114,14 @@ def _public_data(value: Any) -> Any:
 
 
 class MdfDocument:
-    """Parsed MDF 2.45 / 2.32 document.
+    """Parsed MDF 2.45 / 2.32 / 2.51 document.
 
     原始字节用于固定宽度编辑；发生参数或纹理槽增删时，只重建被修改
     材质的尾部表和数据块，并把新块追加到文件末尾。这样可以保留其它
     材质及未知区域，同时让导出结果可重新解析。
     """
 
-    MATERIAL_SIZE = 100
+    MATERIAL_SIZE = 100  # 按版本在实例上覆盖，见 MATERIAL_FIELDS
     PROPERTY_SIZE = 24
     TEXTURE_SIZE = 32
 
@@ -122,8 +132,10 @@ class MdfDocument:
         self.source = Path(source).resolve() if source else None
         self.version = int(self.source.suffix[1:]) if self.source and self.source.suffix[1:].isdigit() else 45
         if self.version not in MDF_VERSIONS:
-            raise MdfError(f"当前联动适配器只接受 MHWILDS MDF 2.45 与 RE4 MDF 2.32，收到 .{self.version}")
+            raise MdfError(f"当前联动适配器只接受 MHWILDS MDF 2.45、RE4 MDF 2.32 与鬼武者 MDF 2.51，收到 .{self.version}")
         self.game, self.master_root = MDF_VERSIONS[self.version]
+        self.fields = MATERIAL_FIELDS[self.version]
+        self.MATERIAL_SIZE = self.fields['size']
         self.material_count = _u16(data, 6)
         if 16 + self.material_count * self.MATERIAL_SIZE > len(data):
             raise MdfError("MDF material table exceeds file")
@@ -144,12 +156,12 @@ class MdfDocument:
         data = self.original
         base = 16 + index * self.MATERIAL_SIZE
         name = _string(data, _u64(data, base))
-        property_count = _u32(data, base + 16)
-        texture_count = _u32(data, base + 20)
-        property_headers = _u64(data, base + 52)
-        texture_headers = _u64(data, base + 60)
-        property_data = _u64(data, base + 76)
-        property_block_size = _u32(data, base + 12)
+        property_count = _u32(data, base + self.fields['property_count'])
+        texture_count = _u32(data, base + self.fields['texture_count'])
+        property_headers = _u64(data, base + self.fields['property_headers'])
+        texture_headers = _u64(data, base + self.fields['texture_headers'])
+        property_data = _u64(data, base + self.fields['property_data'])
+        property_block_size = _u32(data, base + self.fields['block_size'])
         _range(data, property_data, 0, f'material {index} property block')
         if property_headers + property_count * self.PROPERTY_SIZE > len(data):
             raise MdfError(f"material {index} property table exceeds MDF")
@@ -194,7 +206,7 @@ class MdfDocument:
             tex_path = _string(data, _u64(data, t + 16))
             textures.append({"name": tex_name, "path": tex_path, "_raw_header": bytes(data[t:t + self.TEXTURE_SIZE]),
                              "_name_pointer": _u64(data, t), "_path_pointer": _u64(data, t + 16)})
-        mmtrs_offset = _u64(data, base + 92)
+        mmtrs_offset = _u64(data, base + self.fields['mmtrs'])
         mmtrs = []
         if mmtrs_offset:
             _range(data, mmtrs_offset, 64, 'MMTRS table')
@@ -205,8 +217,8 @@ class MdfDocument:
                 raw = _range(data, ptr + 4, count * 4, 'MMTRS indices')
                 mmtrs.append(list(struct.unpack('<' + 'I' * count, raw)))
         gpbf = []
-        gpbf_count = _u32(data, base + 24)
-        gpbf_offset = _u64(data, base + 68)
+        gpbf_count = _u32(data, base + self.fields['gpbf_name_count'])
+        gpbf_offset = _u64(data, base + self.fields['gpbf'])
         _range(data, gpbf_offset, gpbf_count * 32, 'GPBF table')
         for j in range(gpbf_count):
             entry = gpbf_offset + j * 32
@@ -215,20 +227,22 @@ class MdfDocument:
             "index": index,
             "offset": base,
             "name": name,
-            "master": _string(data, _u64(data, base + 84)),
-            "shader_type": _i32(data, base + 36),
-            "name_hash": _hex_flags(_u32(data, base + 8)),
-            "shader_lod": _i32(data, base + 48),
-            "bake_texture_array_size": _i32(data, base + 32),
+            "master": _string(data, _u64(data, base + self.fields['master'])),
+            "shader_type": _i32(data, base + self.fields['shader_type']),
+            "name_hash": _hex_flags(_u32(data, base + self.fields['name_hash'])),
+            "shader_lod": _i32(data, base + self.fields['shader_lod']),
+            "bake_texture_array_size": _i32(data, base + self.fields['bake_size']),
             "gpbf_name_count": gpbf_count,
-            "gpbf_path_count": _u32(data, base + 28),
+            "gpbf_path_count": _u32(data, base + self.fields['gpbf_path_count']),
             "gpbf": gpbf,
             "mmtrs": mmtrs,
-            "flags": [_u32(data, base + 40), _u32(data, base + 44)],
-            "flags_hex": [_hex_flags(_u32(data, base + 40)), _hex_flags(_u32(data, base + 44))],
+            "flags": [_u32(data, base + self.fields['flags']), _u32(data, base + self.fields['flags'] + 4)],
+            "flags_hex": [_hex_flags(_u32(data, base + self.fields['flags'])), _hex_flags(_u32(data, base + self.fields['flags'] + 4))],
             "property_count": property_count,
             "texture_count": texture_count,
             "property_block_size": property_block_size,
+            **({"property_float_count": _u32(data, base + self.fields['float_count'])}
+               if self.fields['float_count'] is not None else {}),
             "properties": properties,
             "textures": textures,
         }
@@ -321,13 +335,13 @@ class MdfDocument:
                 continue
             if not isinstance(value, int) or not 0 <= value <= 0xffffffff:
                 raise MdfError("flags 必须是 32 位无符号整数")
-            offset = material["offset"] + 40 + lane * 4
+            offset = material["offset"] + self.fields['flags'] + lane * 4
             raw = struct.pack("<I", value)
             self._patch(offset, raw)
             material["flags"][lane] = value
             material["flags_hex"][lane] = _hex_flags(value)
         self.edit_notes = [x for x in self.edit_notes if not (x["material_index"] == index and x["kind"] == "flags")]
-        if any(material['offset'] + n in self.patches for n in (40, 44)):
+        if any(material['offset'] + self.fields['flags'] + n in self.patches for n in (0, 4)):
             self.edit_notes.append({"kind": "flags", "material_index": index, "flags": material["flags_hex"][:]})
 
     def _patch(self, offset: int, raw: bytes) -> None:
@@ -365,7 +379,7 @@ class MdfDocument:
             raise MdfError('master 路径不是有效的 UTF-16 文本。') from exc
         if len(encoded) > 65534:
             raise MdfError('master 路径过长。')
-        original = _string(self.original, _u64(self.original, material['offset'] + 84))
+        original = _string(self.original, _u64(self.original, material['offset'] + self.fields['master']))
         self.edit_notes = [note for note in self.edit_notes
                            if not (note['material_index'] == index and note['kind'] == 'master')]
         if path == original:
@@ -394,9 +408,9 @@ class MdfDocument:
             self.edit_notes = [x for x in self.edit_notes if not (x['material_index'] == index and x['kind'] == 'texture' and x['slot'] == slot)]
             self.edit_notes.append({'kind': 'texture', 'material_index': index, 'slot': slot, 'path': path})
             return
-        header = _u64(self.original, material['offset'] + 60) + slot * self.TEXTURE_SIZE
+        header = _u64(self.original, material['offset'] + self.fields['texture_headers']) + slot * self.TEXTURE_SIZE
         for other in self.materials:
-            start = _u64(self.original, other['offset'] + 60)
+            start = _u64(self.original, other['offset'] + self.fields['texture_headers'])
             for other_slot in range(other['texture_count']):
                 if other['index'] == index and other_slot == slot:
                     continue
@@ -522,18 +536,18 @@ class MdfDocument:
             result = self._rebuild_structural_tables(result)
         if self.texture_edits or self.master_edits:
             # Preserve omitted final property alignment before appending strings.
-            declared_end = max((_u64(self.original, m['offset'] + 76) + m['property_block_size'] for m in self.materials), default=len(result))
+            declared_end = max((_u64(self.original, m['offset'] + self.fields['property_data']) + m['property_block_size'] for m in self.materials), default=len(result))
             result.extend(b'\0' * max(0, declared_end - len(result)))
             result.extend(b'\0' * (len(result) % 2))
             for (index, slot), path in sorted(self.texture_edits.items()):
                 if index in self.structural_materials:
                     continue
                 material = self.material(index)
-                header = _u64(self.original, material['offset'] + 60) + slot * self.TEXTURE_SIZE
+                header = _u64(self.original, material['offset'] + self.fields['texture_headers']) + slot * self.TEXTURE_SIZE
                 struct.pack_into('<Q', result, header + 16, len(result))
                 result.extend(path.encode('utf-16-le') + b'\0\0')
             for index, path in sorted(self.master_edits.items()):
-                struct.pack_into('<Q', result, self.material(index)['offset'] + 84, len(result))
+                struct.pack_into('<Q', result, self.material(index)['offset'] + self.fields['master'], len(result))
                 result.extend(path.encode('utf-16-le') + b'\0\0')
         return bytes(result)
 
@@ -542,7 +556,7 @@ class MdfDocument:
         string_ptrs: dict[str, int] = {}
         for material in self.materials:
             # 缓存键来自原字节；当前master可能已修改，其新值不能误指向旧字符串。
-            for relative in (0, 84):
+            for relative in (0, self.fields['master']):
                 pointer = _u64(self.original, material['offset'] + relative)
                 string_ptrs.setdefault(_string(self.original, pointer), pointer)
             for prop in material['properties']:
@@ -600,7 +614,7 @@ class MdfDocument:
                     end = prop['offset'] + prop['byte_size']
             block_size = align(end, 16)
             block = bytearray(block_size)
-            old_data = _u64(self.original, material['offset'] + 76)
+            old_data = _u64(self.original, material['offset'] + self.fields['property_data'])
             old_size = material.get('property_block_size', 0)
             if old_data < len(self.original):
                 block[:min(block_size, max(0, len(self.original) - old_data), old_size)] = self.original[old_data:old_data + min(block_size, max(0, len(self.original) - old_data), old_size)]
@@ -632,12 +646,15 @@ class MdfDocument:
                 texture['_raw_header'] = bytes(header)
             cursor = len(result)
             base = material['offset']
-            struct.pack_into('<I', result, base + 12, block_size)
-            struct.pack_into('<I', result, base + 16, len(material['properties']))
-            struct.pack_into('<I', result, base + 20, len(material['textures']))
-            struct.pack_into('<Q', result, base + 52, property_headers)
-            struct.pack_into('<Q', result, base + 60, texture_headers)
-            struct.pack_into('<Q', result, base + 76, property_data)
+            struct.pack_into('<I', result, base + self.fields['block_size'], block_size)
+            struct.pack_into('<I', result, base + self.fields['property_count'], len(material['properties']))
+            struct.pack_into('<I', result, base + self.fields['texture_count'], len(material['textures']))
+            if self.fields['float_count'] is not None:
+                material['property_float_count'] = end // 4
+                struct.pack_into('<I', result, base + self.fields['float_count'], end // 4)
+            struct.pack_into('<Q', result, base + self.fields['property_headers'], property_headers)
+            struct.pack_into('<Q', result, base + self.fields['texture_headers'], texture_headers)
+            struct.pack_into('<Q', result, base + self.fields['property_data'], property_data)
             material['property_block_size'] = block_size
             material['property_count'] = len(material['properties'])
             material['texture_count'] = len(material['textures'])
@@ -649,8 +666,8 @@ class MdfDocument:
         if _public_data(reparsed.materials) != _public_data(self.materials):
             raise MdfError('MDF 重新解析与预期材质数据不一致，拒绝导出。')
         ranges = ([{"offset": offset, "size": len(raw)} for offset, raw in self.patches.items()] +
-                  [{"offset": self.material(i)['offset'] + 84, "size": 8} for i in self.master_edits] +
-                  [{"offset": _u64(self.original, self.material(i)['offset'] + 60) + slot * self.TEXTURE_SIZE + 16, "size": 8} for i, slot in self.texture_edits if i not in self.structural_materials])
+                  [{"offset": self.material(i)['offset'] + self.fields['master'], "size": 8} for i in self.master_edits] +
+                  [{"offset": _u64(self.original, self.material(i)['offset'] + self.fields['texture_headers']) + slot * self.TEXTURE_SIZE + 16, "size": 8} for i, slot in self.texture_edits if i not in self.structural_materials])
         for index in sorted(self.structural_materials):
             ranges.append({"offset": self.material(index)['offset'], "size": self.MATERIAL_SIZE})
         if len(result) > len(self.original):

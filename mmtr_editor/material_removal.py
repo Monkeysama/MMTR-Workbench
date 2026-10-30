@@ -108,7 +108,8 @@ def plan_removal_layout(old, properties, actions):
     if not removed['parameter']:
         moves = [ParameterMove(p['name'], p['offset'], p['offset'], p['byte_size']) for p in ordered]
     size = (cursor+15)&~15 if removed['parameter'] else old.parameter_bytes
-    new = MaterialTailLayout(size, tuple(t for t in old.texture_names if t not in removed['texture']), old.gpbf_names)
+    new = MaterialTailLayout(size, tuple(t for t in old.texture_names if t not in removed['texture']), old.gpbf_names,
+                             old.header_bytes)
     # MDF 标量数独立于参数块大小；删去填充行内的属性也必须改变布局标记。
     old_components = sum(p.get('count', p['byte_size']//4) for p in ordered)
     new_components = sum(p.byte_size//4 for p in moves)
