@@ -1,6 +1,6 @@
 # 鬼武者支持
 
-2026-10-29。结论：鬼武者（Onimusha: Way of the Sword）的 MMTR `.mmtr.260605155` 与 MDF `.mdf2.51` 可以打开、浏览、编辑 MDF、新增 UserMaterial 参数与 Texture2D、替换 Shader 并另存；原版模板原样另存逐字节一致。游戏内效果尚未验证（见第五节）。
+2026-10-29。结论：鬼武者（Onimusha: Way of the Sword）的 MMTR `.mmtr.260605155` 与 MDF `.mdf2.51` 可以打开、浏览、编辑 MDF、新增 UserMaterial 参数与 Texture2D、替换 Shader 并另存；原版模板原样另存逐字节一致。扩展后的模板在游戏内加载并生效（见第五节）。
 
 ## 一、格式差异
 
@@ -46,8 +46,9 @@
 
 - 标记行长度是进程内全局状态，同一会话交替打开不同游戏的模板时以最后打开的为准。
 - `.mdf2.50`（原版 31 个）未登记。
+- 结构编辑把新的贴图表与属性表追加到 MDF 文件末尾。RE-Mesh-Editor 按第一个材质的贴图表是否紧接材质项来区分鬼武者与 RE9 的 2.51 布局，因此会把这样的文件识别为 RE9；按原版顺序重排后可以正常导入。
 - 计算阶段读取材质贴图的记录仍按现有规则拒绝 `add_texture`；`V_Chara_PL_Cloth_ALP` 选择 `record_index` 105（`ADirectDeferredPreTransformVfx`）可通过。
 
 ## 五、游戏内测试
 
-尚未进行。已部署一个用扩展模板拼接 lilToon 计算的测试 mod（72 个 GBuffer PS），结果待确认。
+2026-10-29。用扩展模板（`V_Chara_PL_Cloth_ALP` + 47 个参数 + 15 个 Texture2D）拼接 lilToon 计算、替换 72 个 GBuffer PS 的测试 mod 在游戏内加载，替换的 Shader 生效，新增参数与贴图按 MDF 中的值读取。
