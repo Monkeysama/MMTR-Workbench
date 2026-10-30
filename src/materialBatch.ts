@@ -60,6 +60,11 @@ const variantMasters: Record<string, string> = {
   MHWilds: "MaterialShader/Variation/variant.mmtr",
   RE4: "_Chainsaw/MasterMaterial/Variation/variant.mmtr",
   SF6: "product/mastermaterial/Variation/variant.mmtr",
+  RE8: "_ge/mastermaterial/master/Variation/variant.mmtr",
+  RE2RT: "mastermaterial/master/Variation/variant.mmtr",
+  MHRISE: "mastermaterial/master/Variation/variant.mmtr",
+  RE3: "mastermaterial/master/Variation/variant.mmtr",
+  RE2: "mastermaterial/master/Variation/variant.mmtr",
 };
 export const defaultVariantMaster = (game?: string) => variantMasters[game ?? ""] ?? variantMasters.MHWilds;
 /** 用户未改过的默认 master 随当前 MDF 的游戏切换；已手动填写的值保持不变。 */

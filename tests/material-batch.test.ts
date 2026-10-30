@@ -39,6 +39,10 @@ test("独立变体默认 master 随 MDF 游戏切换，不覆盖手动填写的�
   assert.equal(defaultVariantMaster(), "MaterialShader/Variation/variant.mmtr");
   assert.equal(defaultVariantMaster("RE4"), "_Chainsaw/MasterMaterial/Variation/variant.mmtr");
   assert.equal(defaultVariantMaster("SF6"), "product/mastermaterial/Variation/variant.mmtr");
+  assert.equal(defaultVariantMaster("RE8"), "_ge/mastermaterial/master/Variation/variant.mmtr");
+  for (const game of ["RE2RT", "MHRISE", "RE3", "RE2"]) {
+    assert.equal(defaultVariantMaster(game), "mastermaterial/master/Variation/variant.mmtr");
+  }
   assert.equal(variantMasterFor("MaterialShader/Variation/variant.mmtr", "RE4"), defaultVariantMaster("RE4"));
   assert.equal(variantMasterFor(defaultVariantMaster("RE4"), "MHWilds"), defaultVariantMaster("MHWilds"));
   assert.equal(variantMasterFor("MaterialShader/Custom/a.mmtr", "RE4"), "MaterialShader/Custom/a.mmtr");
