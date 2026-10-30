@@ -243,7 +243,7 @@ def append_metadata(data, source, operation):
                 prefix[base+0xe8] += len(textures)
                 struct.pack_into('<I', prefix, base+0xd4, total+len(textures))
     delta = len(prefix)-info['shader_start']
-    struct.pack_into('<Q', prefix, 8, len(prefix))
+    struct.pack_into('<Q', prefix, info['record_start'] - 8, len(prefix))
     for record in info['records']:
         for reference in record['shader_references']:
             struct.pack_into('<Q', prefix, record['offset']+reference['field'], reference['offset']+delta)

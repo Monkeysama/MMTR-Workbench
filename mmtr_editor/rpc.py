@@ -43,7 +43,7 @@ class Service:
                              'currentSize':len(d.shader_bytes(s['index'])),'offset':s['offset'],
                              'changed':s['index'] in d.replacements,'passes':s['pass_names']}
                             for s in info['shaders']],
-                'passes':[{'index':r['index'],'group':r['index']//info['header_u16_06'],
+                'passes':[{'index':r['index'],'group':r.get('group_index', r['index']//info['header_u16_06']),
                            'name':d.shader_name(r['name_offset']),
                            'refs':[{'field':x['field'],'stage':x['stage'], 'shader':d.effective_shader(r['index'],x['field'])}
                                    for x in r['shader_references']]} for r in info['records']],

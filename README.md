@@ -1,10 +1,10 @@
 # MMTR Workbench
 
-用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。已登记荒野、RE4、SF6、旧版 DD2 及 RE8/MHRISE/RE2RT/RE2/RE3 的布局；各游戏的语料与验证边界见 [多游戏支持](docs/game-support.md)，RE4 的差异见 [RE4 支持](docs/re4-support.md)。
+用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。已登记荒野、RE4、SF6、旧版 DD2、RE8/MHRISE/RE2RT/RE2/RE3 以及 RE9/Pragmata/当前 DD2/鬼武者的 per-target 布局；各游戏的语料与验证边界见 [多游戏支持](docs/game-support.md)，RE4 的差异见 [RE4 支持](docs/re4-support.md)。
 
 ## 功能
 
-- 浏览已登记布局的同名序列 MMTR（荒野 4/5 组，RE4/SF6/旧版 DD2/MHRISE 3 组，RE8/RE2RT 5 组，RE2/RE3 4 组）的渲染通道、Shader、常量缓冲和资源，支持带数字版本后缀的文件。
+- 浏览已登记布局的 MMTR（荒野 4/5 组，RE4/SF6/旧版 DD2/MHRISE 3 组，RE8/RE2RT 5 组，RE2/RE3 4 组，RE9/Pragmata/当前 DD2/鬼武者 4 个 per-target 目标）的渲染通道、Shader、常量缓冲和资源，支持带数字版本后缀的文件。
 - 查看 DXIL 反汇编和可读伪代码，在已支持范围内重建 HLSL、编译与替换 Shader。
 - 按已登记的 2.10、2.13、2.19、2.21、2.23、2.31、2.32、2.45 布局编辑 MDF 材质参数、纹理路径和设置，增删参数/贴图槽，按 MMTR 路径筛选关联材质。
 - 新增 UserMaterial 尾部参数或 Texture2D 接口，迁移已识别的材质寻址、布局和关联资源表，并验证后另存。

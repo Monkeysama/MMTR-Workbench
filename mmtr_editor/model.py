@@ -126,7 +126,7 @@ def _add_cbuffer_member_bytes(data: bytes, cbuffer_name: str, member_name: str,
         struct.pack_into('<I', prefix, descriptor + 16, new_size)
         struct.pack_into('<I', prefix, descriptor + 20, entry['member_count'] + 1)
         struct.pack_into('<Q', prefix, descriptor + 24, member_offset)
-    struct.pack_into('<Q', prefix, 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['record_start'] - 8, new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -209,7 +209,7 @@ def _add_table_resource_bytes(data: bytes, kind: str, record_index: int, resourc
         if old_pointer == table_offset:
             new_record_offset = candidate['offset'] + head_delta if candidate['offset'] >= insert_pos else candidate['offset']
             struct.pack_into('<B', prefix, new_record_offset + count_field, len(table_offsets) + 1)
-    struct.pack_into('<Q', prefix, 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['record_start'] - 8, new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -253,11 +253,18 @@ class Document:
             _, self.info = inspect_data(self.original, self.source)
             groups = self.info['header_u16_04']
             # 只放开各游戏已研究的组数；声明记录必须完整，不能接受兼容扫描的截断结果。
-            allowed = {g for game, _size, groups, _keys in FORMATS.values() if game == self.info['game'] for g in groups}
+            allowed = {g for game, _size, groups, _keys, _layout in FORMATS.values() if game == self.info['game'] for g in groups}
+            layout = self.info.get('header_layout', 'uniform')
+            counts = self.info.get('program_counts') or [self.info['header_u16_06']] * groups
+            # per-target 允许各目标程序数不同，组边界由 program_counts 决定；uniform 仍要求同名序列。
+            sequence_ok = (layout == 'per-target'
+                           or all(g['name_sequence_matches_first'] for g in self.info['candidate_groups']))
+            counts_ok = (len(counts) == groups and sum(counts) == self.info['record_count']
+                         and all(g['record_count'] == counts[i]
+                                 for i, g in enumerate(self.info['candidate_groups'])))
             if (groups not in allowed or len(self.info['candidate_groups']) != groups
-                    or self.info['record_count'] != groups * self.info['header_u16_06']
-                    or any(not g['name_sequence_matches_first'] for g in self.info['candidate_groups'])):
-                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组）。')
+                    or not counts_ok or not sequence_ok):
+                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组；per-target 四组：RE9/PRAGMATA/DD2/ONIMUSHA）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
         self.replacements: dict[int, bytes] = {}

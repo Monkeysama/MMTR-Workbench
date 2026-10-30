@@ -20,14 +20,20 @@ import uuid
 STAGES = {0: "ps", 1: "vs", 2: "gs", 3: "hs", 4: "ds", 5: "cs", 6: "lib", 13: "ms", 14: "as"}
 RECORD_START = 0x10
 RECORD_SIZE = 0x110
-# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数, Shader/状态后是否带 8 字节运行时缓存键)。
-# 两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107 多出 8 字节（全部原版语料为零），
+# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数, Shader/状态后是否带 8 字节运行时缓存键,
+# header 布局)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107 多出 8 字节（全部原版语料为零），
 # 其后的 compute 线程组与拓扑随之后移。RE8/MHRISE/RE2RT 不写运行时缓存键，Shader 记录首尾相接。
-FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True), 221007879: ("RE4", 0x108, (3,), True),
-           221102761: ("SF6", 0x108, (3,), True), 250109895: ("SF6", 0x108, (3,), True),
-           240112003: ("DD2", 0x108, (3,), True), 240423143: ("DD2", 0x108, (3,), True),
-           2102188797: ("RE8", 0x108, (5,), False), 220427553: ("MHRISE", 0x108, (3,), False),
-           2109101635: ("RE2RT", 0x108, (5,), False)}
+# Tier D 的 RE9/Pragmata/DD2/鬼武者使用每目标一个 u16 程序数的 per-target header。
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True, "uniform"), 221007879: ("RE4", 0x108, (3,), True, "uniform"),
+           221102761: ("SF6", 0x108, (3,), True, "uniform"), 250109895: ("SF6", 0x108, (3,), True, "uniform"),
+           240112003: ("DD2", 0x108, (3,), True, "uniform"), 240423143: ("DD2", 0x108, (3,), True, "uniform"),
+           2102188797: ("RE8", 0x108, (5,), False, "uniform"), 220427553: ("MHRISE", 0x108, (3,), False, "uniform"),
+           2109101635: ("RE2RT", 0x108, (5,), False, "uniform"),
+           251112994: ("RE9", 0x110, (4,), True, "per-target"),
+           251112995: ("PRAGMATA", 0x110, (4,), True, "per-target"),
+           251112814: ("ONIMUSHAWOTSDEMO", 0x110, (4,), True, "per-target"),
+           260511270: ("DD2", 0x110, (4,), True, "per-target"),
+           260605155: ("ONIMUSHAWOTS", 0x110, (4,), True, "per-target")}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -120,18 +126,18 @@ def inspect_data(data, path):
     """
     version = resource_version(path)
     if version in FORMATS:
-        game, record_size, _groups, runtime_keys = FORMATS[version]
-        return _inspect_layout(data, path, game, record_size, version, runtime_keys)
+        game, record_size, _groups, runtime_keys, header_layout = FORMATS[version]
+        return _inspect_layout(data, path, game, record_size, version, runtime_keys, header_layout)
     results, errors = [], []
     seen = set()
-    for game, record_size, _groups, runtime_keys in FORMATS.values():
-        # 无后缀时按“记录长度 + 缓存键布局”去重；两种布局不能共用同一次解析。
-        key = (record_size, runtime_keys)
+    for game, record_size, _groups, runtime_keys, header_layout in FORMATS.values():
+        # 无后缀时按“记录长度 + 缓存键布局 + header 布局”去重；不同布局不能共用同一次解析。
+        key = (record_size, runtime_keys, header_layout)
         if key in seen:
             continue
         seen.add(key)
         try:
-            results.append(_inspect_layout(data, path, game, record_size, version, runtime_keys))
+            results.append(_inspect_layout(data, path, game, record_size, version, runtime_keys, header_layout))
         except ValueError as exc:
             errors.append(exc)
     if len(results) == 1:
@@ -141,11 +147,32 @@ def inspect_data(data, path):
     raise ValueError("SDF record size is ambiguous; add the resource version suffix to the file name")
 
 
-def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys):
+def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys,
+                    header_layout="uniform"):
     if data[:4] != b"SDF\0":
         raise ValueError("Not an SDF/MMTR file")
-    shader_start = u64(data, 8)
-    if not RECORD_START < shader_start < len(data):
+    header04, header06 = unpack(data, "<HH", 4)
+    if header_layout == "uniform":
+        program_counts = [header06] * header04
+        record_start = RECORD_START
+        shader_start = u64(data, 8)
+    elif header_layout == "per-target":
+        counts_end = 6 + header04 * 2
+        if counts_end > len(data):
+            raise ValueError("Per-target header is truncated")
+        header_qword = (counts_end + 7) & ~7
+        if header_qword + 8 > len(data):
+            raise ValueError("Per-target header is truncated")
+        if any(data[counts_end:header_qword]):
+            raise ValueError("Per-target header padding is non-zero")
+        program_counts = [unpack(data, "<H", 6 + i * 2)[0] for i in range(header04)]
+        if sum(program_counts) and any(count <= 0 for count in program_counts):
+            raise ValueError("Every declared target must own at least one program")
+        shader_start = u64(data, header_qword)
+        record_start = header_qword + 8
+    else:
+        raise ValueError(f"Unknown SDF header layout: {header_layout}")
+    if not record_start < shader_start < len(data):
         raise ValueError("Invalid shader region start")
     shaders = []
     offset = shader_start
@@ -170,7 +197,7 @@ def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys):
         if position in metadata[kind]:
             return metadata[kind][position]
         width = TABLE_FIELDS[kind][2]
-        if position < RECORD_START or position + width > shader_start:
+        if position < record_start or position + width > shader_start:
             raise ValueError("Metadata descriptor outside metadata region")
         nameptr, namehash, reserved = unpack(data, "<QII", position)
         name = cstring(data, nameptr, shader_start)
@@ -195,15 +222,16 @@ def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys):
         metadata[kind][position] = entry
         return entry
 
-    header04, header06 = unpack(data, "<HH", 4)
-    declared_record_count = header04 * header06
-    # 记录表由文件头的组数和组内记录数界定；其后的区域是 metadata/字符串，不能继续按记录扫描。
+    declared_record_count = sum(program_counts)
+    # 记录表由文件头声明的目标计数界定；其后的区域是 metadata/字符串，不能继续按记录扫描。
+    if header_layout == "per-target" and record_start + declared_record_count * record_size > shader_start:
+        raise ValueError("Header-declared record table is truncated")
     record_limit = (declared_record_count
                     if declared_record_count
-                    and RECORD_START + declared_record_count * record_size <= shader_start
+                    and record_start + declared_record_count * record_size <= shader_start
                     else None)
     records = []
-    offset = RECORD_START
+    offset = record_start
     while (offset + record_size <= shader_start
            and (record_limit is None or len(records) < record_limit)):
         name_pointer = u64(data, offset)
@@ -250,24 +278,32 @@ def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys):
     for shader in shaders:
         shader["pass_names"] = names[shader["index"]]
     groups = []
-    if header04 * header06 == len(records):
-        for i in range(header04):
-            group = records[i * header06:(i + 1) * header06]
+    if sum(program_counts) == len(records):
+        first_names = None
+        cursor = 0
+        for i, count in enumerate(program_counts):
+            group = records[cursor:cursor + count]
             ids = sorted({ref["shader_index"] for record in group for ref in record["shader_references"]})
+            names = [r["name_offset"] for r in group]
+            if first_names is None:
+                first_names = names
+            for record in group:
+                record["group_index"] = i
             groups.append({"index": i, "record_count": len(group), "unique_shader_count": len(ids),
                            "stages": dict(collections.Counter(shaders[j]["stage"] for j in ids)),
                            "shader_models": dict(collections.Counter(shaders[j]["shader_model"] for j in ids)),
-                           "name_sequence_matches_first": [r["name_offset"] for r in group] ==
-                           [r["name_offset"] for r in records[:header06]]})
+                           "name_sequence_matches_first": names == first_names})
+            cursor += count
     rebuilt = data[:shader_start] + b"".join(
         data[s["offset"]:s["trailer_offset"] + (8 if runtime_cache_keys else 0)] for s in shaders)
     strings = [{"offset": m.start(), "text": m.group().decode("ascii")} for m in re.finditer(rb"[ -~]{5,}", data[:shader_start])]
     return data, {
         "source": str(path.resolve()), "size": len(data), "sha256": sha256(data),
         "magic": "SDF\\0", "header_u32_04": u32(data, 4),
-        "header_u16_04": header04, "header_u16_06": header06, "candidate_groups": groups,
+        "header_u16_04": header04, "header_u16_06": header06, "program_counts": program_counts,
+        "header_layout": header_layout, "candidate_groups": groups,
         "game": game, "resource_version": version, "runtime_cache_keys": runtime_cache_keys,
-        "shader_start": shader_start, "record_start": RECORD_START, "record_size": record_size,
+        "shader_start": shader_start, "record_start": record_start, "record_size": record_size,
         "record_end": offset, "record_count": len(records), "shader_count": len(shaders),
         "stages": dict(collections.Counter(s["stage"] for s in shaders)),
         "shader_models": dict(collections.Counter(s["shader_model"] for s in shaders)),

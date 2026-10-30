@@ -15,19 +15,31 @@ PATH = Path('MaterialShader/Variation/synthetic.mmtr.240906211')
 
 # 各组共享同一 PS/绑定/状态，测试共享者闭包及非零未知字节的保留。
 # record_size 0x108 生成 RE4 记录：0xFF 之前的字段与荒野相同，没有荒野 0x100..0x107 的 8 字节。
-def fixture(group_count=4, programs_per_group=1, record_size=0x110, runtime_cache_keys=True):
-    record_count = group_count * programs_per_group
-    data = bytearray(16+record_count*record_size)
+def fixture(group_count=4, programs_per_group=1, record_size=0x110, runtime_cache_keys=True,
+            header_layout='uniform', program_counts=None):
+    counts = list(program_counts or [programs_per_group] * group_count)
+    assert len(counts) == group_count
+    if header_layout == 'uniform':
+        assert len(set(counts)) == 1
+    record_count = sum(counts)
+    table_start = 16 if header_layout == 'uniform' else ((6 + group_count * 2 + 7) & ~7) + 8
+    data = bytearray(table_start + record_count * record_size)
     data[:4] = b'SDF\0'
-    struct.pack_into('<HH', data, 4, group_count, programs_per_group)
+    if header_layout == 'uniform':
+        struct.pack_into('<HH', data, 4, group_count, counts[0])
+    else:
+        struct.pack_into('<H', data, 4, group_count)
+        for i, count in enumerate(counts):
+            struct.pack_into('<H', data, 6 + i * 2, count)
 
     def append(blob):
         position = len(data)
         data.extend(blob)
         return position
 
-    names = [append(b'Pass\0' if programs_per_group == 1 else f'Pass{i}\0'.encode())
-             for i in range(programs_per_group)]
+    names = [append(b'Pass\0' if max(counts) == 1 else f'Pass{i}\0'.encode())
+             for i in range(max(counts))]
+    name_indices = [i for count in counts for i in range(count)]
     cbname = append(b'UserMaterial\0')
     membername = append(b'Value\0')
     texname = append(b'BaseMap\0')
@@ -55,10 +67,10 @@ def fixture(group_count=4, programs_per_group=1, record_size=0x110, runtime_cach
     blob = b'DXBC'+bytes(16)+struct.pack('<III', 1, 72, 1)+struct.pack('<I', 36)+b'DXIL'+struct.pack('<I', 28)+payload
     assert len(blob) == 72
     data.extend(blob + (struct.pack('<Q', xxh64(blob, 0xffffffff)) if runtime_cache_keys else b''))
-    struct.pack_into('<Q', data, 8, start)
+    struct.pack_into('<Q', data, table_start - 8, start)
     for i in range(record_count):
-        base = 16+i*record_size
-        for field, pointer in [(0, names[i % programs_per_group]), (0x30, start), (0x40, layout), (0x48, raster), (0x50, blend),
+        base = table_start+i*record_size
+        for field, pointer in [(0, names[name_indices[i]]), (0x30, start), (0x40, layout), (0x48, raster), (0x50, blend),
                                (0x58, depth), (0x68, cb), (0x70, metadata_cb), (0x88, srv), (0x90, metadata_srv)]:
             struct.pack_into('<Q', data, base+field, pointer)
         struct.pack_into('<I', data, base+0xCC, len(blob))

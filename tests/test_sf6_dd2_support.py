@@ -53,7 +53,7 @@ class Dd2MmtrTests(unittest.TestCase):
                 doc = Document(sf6_fixture(), path)
                 self.assertEqual((doc.info['game'], doc.info['record_size']), ('DD2', 0x108))
                 with self.assertRaisesRegex(EditError, '旧版 DD2 三组'):
-                    Document(sf6_fixture(4), path)
+                    Document(sf6_fixture(2), path)
 
 
 class Sf6MdfTests(unittest.TestCase):

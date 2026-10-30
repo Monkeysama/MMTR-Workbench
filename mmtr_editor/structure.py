@@ -130,7 +130,7 @@ class Program:
 
 @dataclass(frozen=True)
 class Header:
-    """四/五组布局的 header，资源版本只从文件名提取，组数不代表资源类别。"""
+    """MMTR 文件头的原始字节；资源版本只从文件名提取，组数不代表资源类别。"""
     raw: bytes
     group_count: int
     programs_per_group: int
@@ -262,7 +262,8 @@ def parse_structure(data, path, info=None):
 
     if version not in KNOWN_VERSIONS:
         diagnostic('resource_version_unverified', None, 0, f'资源版本未验证: {version}', 'warning')
-    if info['header_u16_04'] * info['header_u16_06'] != len(info['records']):
+    declared_records = sum(info.get('program_counts') or [info['header_u16_06']] * info['header_u16_04'])
+    if declared_records != len(info['records']):
         diagnostic('header_count', None, 4, 'header 声明数量与兼容解析结果不同')
 
     def span(kind, pointer, size, use, values=()):
@@ -372,7 +373,7 @@ def parse_structure(data, path, info=None):
                                        (('algorithm', 'opaque'),))
                     if trailer_key:
                         object_refs.append(trailer_key)
-        programs.append(Program(i, i//max(1, info['header_u16_06']), base, record['name'], raw,
+        programs.append(Program(i, record.get('group_index', i//max(1, info['header_u16_06'])), base, record['name'], raw,
             tuple(refs), tuple(tables), tuple(object_refs), total,
             struct.unpack_from('<3H', raw, record_size-8), struct.unpack_from('<H', raw, record_size-2)[0], raw[0xFF:record_size-8].hex()))
 
@@ -402,7 +403,7 @@ def parse_structure(data, path, info=None):
         cursor = max(cursor, obj.offset+obj.size)
     if cursor < upper:
         unmodeled.append((cursor, upper-cursor))
-    header = Header(data[:16], info['header_u16_04'], info['header_u16_06'], upper, lower, version)
+    header = Header(data[:info['record_start']], info['header_u16_04'], info['header_u16_06'], upper, lower, version)
     return Structure(identity, data, header, tuple(programs), raw_objects, metadata,
                      tuple(tuple(rows) for rows in shader_users), tuple(diagnostics), tuple(unmodeled))
 
