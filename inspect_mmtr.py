@@ -419,7 +419,8 @@ def reflection(text):
     def fields(body):
         variables = []
         for line in body.splitlines():
-            variable = re.search(r";\s+(.+?)\s+(\w+(?:\[[^]]+\])?);\s+; Offset:\s*(\d+)", line)
+            # DXC 在长字段名后可能输出 ";; Offset:"；两种分隔都要接受。
+            variable = re.search(r";\s+(.+?)\s+(\w+(?:\[[^]]+\])?);+\s*;?\s*Offset:\s*(\d+)", line)
             if variable and not variable[1].strip().startswith("}"):
                 variables.append({"type": variable[1].strip(), "name": variable[2], "offset": int(variable[3])})
         return variables
