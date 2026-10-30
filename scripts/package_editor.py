@@ -19,14 +19,19 @@ def main():
     dest.mkdir(parents=True, exist_ok=True)
     mapping = [(built / 'mmtr-workbench.exe', 'MMTR Workbench.exe'),
                (built / 'mmtr-core.exe', 'mmtr-core.exe'),
-               (ROOT / '工具使用说明.md', '使用说明.md')]
+               (ROOT / '工具使用说明.md', '使用说明.md'),
+               (ROOT / 'docs' / 'game-support.md', '游戏支持说明.md')]
     for source, name in mapping:
         if not source.is_file():
             raise FileNotFoundError(f'Run npm run desktop:build first: {source}')
         shutil.copy2(source, dest / name)
     guide = dest / '使用说明.md'
+    # 用户说明链接指向包内文档；开发环境说明保留仓库入口。
     guide.write_text(guide.read_text(encoding='utf-8').replace(
-        '](docs/workbench-mcp.md)', '](MCP使用说明.md)'), encoding='utf-8')
+        '](docs/workbench-mcp.md)', '](MCP使用说明.md)').replace(
+        '](docs/game-support.md)', '](游戏支持说明.md)').replace(
+        '](docs/development.md)',
+        '](https://github.com/Monkeysama/MMTR-Workbench/blob/main/docs/development.md)'), encoding='utf-8')
     # 配置只随便携包交付，不改客户端全局设置；移动文件夹后需更新command。
     configuration = {'mcpServers': {'mmtr-workbench': {
         'command': args.mcp_command or str((dest / 'mmtr-core.exe').resolve()), 'args': ['--mcp']}}}

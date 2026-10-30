@@ -62,8 +62,11 @@ class PortablePackageConsoleTests(unittest.TestCase):
             for name in ('mmtr-workbench.exe', 'mmtr-core.exe'):
                 (built / name).write_bytes(b'synthetic executable placeholder')
             (root / 'package.json').write_text('{"version":"0.3.0"}', encoding='utf-8')
-            (root / '工具使用说明.md').write_text('[MCP](docs/workbench-mcp.md)', encoding='utf-8')
+            (root / '工具使用说明.md').write_text(
+                '[MCP](docs/workbench-mcp.md)\n[游戏](docs/game-support.md)\n[开发](docs/development.md)',
+                encoding='utf-8')
             (root / 'docs' / 'workbench-mcp.md').write_text('中文说明', encoding='utf-8')
+            (root / 'docs' / 'game-support.md').write_text('游戏支持表', encoding='utf-8')
             buffer = io.BytesIO()
             stream = io.TextIOWrapper(buffer, encoding='cp1252', errors='strict')
             with patch.object(package_editor, 'ROOT', root), patch('sys.argv', ['package_editor.py']), redirect_stdout(stream):
@@ -73,6 +76,12 @@ class PortablePackageConsoleTests(unittest.TestCase):
             directory, archive = Path(report['directory']), Path(report['archive'])
             self.assertTrue(verify_package(directory, archive))
             self.assertEqual((directory / 'MCP使用说明.md').read_text(encoding='utf-8'), '中文说明')
-            self.assertIn('](MCP使用说明.md)', (directory / '使用说明.md').read_text(encoding='utf-8'))
+            self.assertEqual((directory / '游戏支持说明.md').read_text(encoding='utf-8'), '游戏支持表')
+            guide = (directory / '使用说明.md').read_text(encoding='utf-8')
+            self.assertIn('](MCP使用说明.md)', guide)
+            self.assertIn('](游戏支持说明.md)', guide)
+            self.assertIn('](https://github.com/Monkeysama/MMTR-Workbench/blob/main/docs/development.md)', guide)
+            self.assertNotIn('](docs/', guide)
             with zipfile.ZipFile(archive) as bundle:
                 self.assertIn('MMTR-Workbench/使用说明.md', bundle.namelist())
+                self.assertIn('MMTR-Workbench/游戏支持说明.md', bundle.namelist())
