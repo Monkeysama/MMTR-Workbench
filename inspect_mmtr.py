@@ -24,7 +24,8 @@ RECORD_SIZE = 0x110
 # header 布局)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107 多出 8 字节（全部原版语料为零），
 # 其后的 compute 线程组与拓扑随之后移。RE8/MHRISE/RE2RT 不写运行时缓存键，Shader 记录首尾相接。
 # Tier D 的 RE9/Pragmata/DD2/鬼武者使用每目标一个 u16 程序数的 per-target header。
-FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True, "uniform"), 221007879: ("RE4", 0x108, (3,), True, "uniform"),
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True, "uniform"),
+           250206176: ("MHWilds", 0x110, (4, 5), True, "uniform"), 221007879: ("RE4", 0x108, (3,), True, "uniform"),
            221102761: ("SF6", 0x108, (3,), True, "uniform"), 250109895: ("SF6", 0x108, (3,), True, "uniform"),
            240112003: ("DD2", 0x108, (3,), True, "uniform"), 240423143: ("DD2", 0x108, (3,), True, "uniform"),
            2102188797: ("RE8", 0x108, (5,), False, "uniform"), 220427553: ("MHRISE", 0x108, (3,), False, "uniform"),
@@ -145,7 +146,16 @@ def inspect_data(data, path):
         except ValueError as exc:
             errors.append(exc)
     if len(results) == 1:
-        return results[0]
+        raw, info = results[0]
+        key = (info['record_size'], info['runtime_cache_keys'], info['header_layout'])
+        headers = {MATERIAL_HEADER_BYTES.get(game, 0)
+                   for game, size, _groups, keys, layout in FORMATS.values()
+                   if (size, keys, layout) == key}
+        if len(headers) > 1:
+            # 同一结构可属于不同材质头；保留浏览和结构编辑，不猜游戏或地址语义。
+            info['game'] = 'Unknown'
+            info['material_header_bytes'] = None
+        return raw, info
     if not results:
         raise errors[0]
     raise ValueError("SDF record size is ambiguous; add the resource version suffix to the file name")

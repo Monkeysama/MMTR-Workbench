@@ -253,6 +253,8 @@ def append_metadata(data, source, operation):
 # 从关联MDF及既有扩展记录恢复当前尾部布局；不把缺反射当作没有材质数据。
 def current_layout(document, material, info=None):
     info = info if info is not None else document.current_info()
+    if info.get('material_header_bytes') is None:
+        raise EditError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
     buffers = [cb for cb in info['metadata']['cbuffers'] if cb['name'] == 'UserMaterial']
     if not buffers or len({(cb['buffer_size'], cb['members_offset'], cb['member_count']) for cb in buffers}) != 1:
         raise EditError('UserMaterial共享成员布局不一致。')

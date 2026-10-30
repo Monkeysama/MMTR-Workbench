@@ -40,7 +40,7 @@ const evidence: Record<Evidence, { label: string; type: "success" | "warning" | 
 };
 
 const rows: SupportRow[] = [
-  { id: "mhwilds", name: "Monster Hunter Wilds", games: ["MHWilds"], versions: [240906211], mdf: "2.45",
+  { id: "mhwilds", name: "Monster Hunter Wilds", games: ["MHWilds"], versions: [240906211, 250206176], mdf: "2.45",
     evidence: "game", note: "真实语料与游戏内验证" },
   { id: "re4", name: "Resident Evil 4", games: ["RE4"], versions: [221007879], mdf: "2.32",
     evidence: "existing", note: "v0.4.2 既有范围，本轮未重验" },
@@ -72,9 +72,11 @@ const currentRow = computed(() => {
   const doc = props.doc;
   if (!doc) return null;
   return rows.find((row) =>
-    row.games.includes(doc.game) && row.versions.includes(doc.resource_version)) ?? null;
+    row.games.includes(doc.game) && doc.resource_version !== null && row.versions.includes(doc.resource_version)) ?? null;
 });
-const currentEvidence = computed(() => currentRow.value ? evidence[currentRow.value.evidence] : null);
+const wildsAlternate = computed(() => props.doc?.game === "MHWilds" && props.doc.resource_version === 250206176);
+const currentEvidence = computed(() => currentRow.value ? evidence[wildsAlternate.value ? "corpus" : currentRow.value.evidence] : null);
+const currentNote = computed(() => wildsAlternate.value ? "真实样本已验证解析与重建；本次未进行游戏内测试" : currentRow.value?.note);
 const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${props.mdfVersion}`);
 </script>
 
@@ -94,7 +96,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
     <div ref="body" class="support-body">
       <section v-if="doc" class="support-current">
         <div class="support-current-head">
-          <div><span class="support-kicker">当前文件</span><strong>{{ gameName(doc.game) }} · {{ doc.resource_version }}</strong></div>
+          <div><span class="support-kicker">当前文件</span><strong>{{ gameName(doc.game) }} · {{ doc.resource_version ?? "未提供版本" }}</strong></div>
           <ElTag :type="currentEvidence?.type ?? 'info'" effect="plain">{{ currentEvidence?.label ?? "未登记版本" }}</ElTag>
         </div>
         <div class="support-current-grid">
@@ -102,9 +104,10 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
           <div><small>分组</small><b>{{ doc.candidate_groups.length }} 组 · {{ doc.header_layout === "per-target" ? "每目标" : "统一" }}</b></div>
           <div><small>运行时缓存键</small><b>{{ doc.runtime_cache_keys ? "8 字节" : "无" }}</b></div>
           <div v-if="doc.material_header_bytes"><small>材质头</small><b>{{ doc.material_header_bytes }} 字节</b></div>
+          <div v-else-if="doc.material_header_bytes === null"><small>材质头</small><b>未确定，请使用已登记的资源版本后缀</b></div>
         </div>
-        <p v-if="mdfLabel" class="support-mdf">{{ mdfLabel }}<span v-if="mdfGame"> · {{ gameName(mdfGame) }}</span><span v-if="mdfVersion === 51" class="support-warn"> · 2.51 仅 Onimusha 布局经过验证</span></p>
-        <p v-if="currentRow" class="support-current-note">{{ currentRow.note }}</p>
+        <p v-if="mdfLabel" class="support-mdf">{{ mdfLabel }}<span v-if="mdfGame"> · {{ gameName(mdfGame) }}</span><span v-if="mdfVersion === 51" class="support-warn"> · 104/108 字节材质项</span></p>
+        <p v-if="currentNote" class="support-current-note">{{ currentNote }}</p>
       </section>
       <p v-else class="support-empty">打开 MMTR 文件后，这里会显示当前文件的格式版本。</p>
 
@@ -123,7 +126,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
         </table>
       </div>
 
-      <p class="support-footnote">MDF 2.51 目前统一按 Onimusha: Way of the Sword 的 104 字节材质项解析；Resident Evil Requiem、Pragmata、Dragon's Dogma 2 (current) 未单独验证。编辑前请保留原文件备份。</p>
+      <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem、Pragmata、Dragon's Dogma 2 (current) 的真实文件布局尚未核实。</p>
     </div>
     <template #footer><ElButton @click="emit('update:modelValue', false)">关闭</ElButton></template>
   </ElDialog>

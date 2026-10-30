@@ -253,7 +253,11 @@ class Document:
             _, self.info = inspect_data(self.original, self.source)
             groups = self.info['header_u16_04']
             # 只放开各游戏已研究的组数；声明记录必须完整，不能接受兼容扫描的截断结果。
-            allowed = {g for game, _size, groups, _keys, _layout in FORMATS.values() if game == self.info['game'] for g in groups}
+            allowed = {g for game, size, groups, keys, layout in FORMATS.values()
+                       if (game == self.info['game'] or
+                           (self.info['game'] == 'Unknown' and
+                            (size, keys, layout) == (self.info['record_size'], self.info['runtime_cache_keys'], self.info['header_layout'])))
+                       for g in groups}
             layout = self.info.get('header_layout', 'uniform')
             counts = self.info.get('program_counts') or [self.info['header_u16_06']] * groups
             # per-target 允许各目标程序数不同，组边界由 program_counts 决定；uniform 仍要求同名序列。
@@ -418,12 +422,16 @@ class Document:
         """暂存 UserMaterial 等 cbuffer 成员新增，导出时同步所有 metadata 描述符。"""
         if not isinstance(cbuffer, str) or not cbuffer:
             raise EditError('常量缓冲名称无效。')
+        if cbuffer == 'UserMaterial' and self.info['material_header_bytes'] is None:
+            raise EditError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
         _add_cbuffer_member_bytes(self.build()[0], cbuffer, name, byte_size, byte_offset, self.source)
         self.metadata_edits.append({'kind': 'add_cbuffer_member', 'cbuffer': cbuffer, 'name': name,
                                     'byte_size': byte_size, 'byte_offset': byte_offset})
 
     def remove_cbuffer_member(self, cbuffer: str, name: str) -> None:
         """暂存 cbuffer 成员删除，导出时压缩共享成员表并更新大小。"""
+        if cbuffer == 'UserMaterial' and self.info['material_header_bytes'] is None:
+            raise EditError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
         _remove_cbuffer_member_bytes(self.build()[0], cbuffer, name, self.source)
         self.metadata_edits.append({'kind': 'remove_cbuffer_member', 'cbuffer': cbuffer, 'name': name})
 
@@ -508,6 +516,8 @@ class Document:
         elif 'UserMaterial' in changed_cbuffers:
             from .material_addresses import material_reads
             # 旧手动同步只验证具名反射，不能证明bindless/raw及实例流跟随布局迁移。
+            if self.info['material_header_bytes'] is None:
+                raise EditError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
             decoder = Dxc(dll)
             try:
                 for shader in current['shaders']:

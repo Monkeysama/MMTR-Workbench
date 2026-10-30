@@ -29,6 +29,17 @@ class Re4MmtrTests(unittest.TestCase):
         _, info = inspect_data(fixture(), WILDS_PATH)
         self.assertEqual((info['game'], info['record_size']), ('MHWilds', 0x110))
 
+    def test_both_wilds_versions_are_registered_and_round_trip(self):
+        raw = fixture()
+        for version in (240906211, 250206176):
+            with self.subTest(version=version):
+                path = Path(f'synthetic.mmtr.{version}')
+                doc = Document(raw, path)
+                self.assertEqual((doc.info['game'], doc.info['resource_version']), ('MHWilds', version))
+                self.assertEqual(doc.build()[0], raw)
+                self.assertNotIn('resource_version_unverified',
+                                 [d.code for d in parse_structure(raw, path).diagnostics])
+
     def test_wrong_version_suffix_is_rejected(self):
         with self.assertRaises(EditError):
             Document(re4_fixture(), WILDS_PATH)

@@ -2,7 +2,7 @@
 
 | 游戏 | MMTR 版本 | MDF 版本 | 是否完整测试 |
 |---|---|---|---|
-| Monster Hunter Wilds | 240906211 | 2.45 | 否 |
+| Monster Hunter Wilds | 240906211 / 250206176 | 2.45 | 否 |
 | Resident Evil 4 | 221007879 | 2.32 | 否 |
 | Onimusha: Way of the Sword（含 Demo） | 260605155 / 251112814 | 2.51 | 否 |
 | Monster Hunter Rise | 220427553 | 2.23 | 否 |

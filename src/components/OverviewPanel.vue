@@ -102,7 +102,7 @@ const groups = computed(() =>
           }}</ElDescriptionsItem>
           <ElDescriptionsItem label="游戏 / 资源版本"
             ><span class="mono">{{ gameName(doc.game) }}</span> ·
-            {{ doc.resource_version }}</ElDescriptionsItem
+            {{ doc.resource_version ?? "未提供" }}</ElDescriptionsItem
           >
           <ElDescriptionsItem label="通道记录"
             ><span class="mono">0x{{ doc.record_size.toString(16) }}</span>
@@ -113,6 +113,9 @@ const groups = computed(() =>
           >
           <ElDescriptionsItem v-if="doc.material_header_bytes" label="材质头"
             >{{ doc.material_header_bytes }} 字节</ElDescriptionsItem
+          >
+          <ElDescriptionsItem v-else-if="doc.material_header_bytes === null" label="材质头"
+            >未确定，请使用已登记的资源版本后缀</ElDescriptionsItem
           >
           <ElDescriptionsItem label="名称 Hash"
             ><span class="mono">Murmur3</span> · seed

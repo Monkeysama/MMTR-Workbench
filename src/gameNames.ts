@@ -1,5 +1,6 @@
 /** 内部游戏键来自 MMTR 资源版本；界面统一显示英文全名。 */
 const GAME_NAMES: Record<string, string> = {
+  Unknown: "未知",
   MHWilds: "Monster Hunter Wilds",
   RE4: "Resident Evil 4",
   ONIMUSHAWOTS: "Onimusha: Way of the Sword",

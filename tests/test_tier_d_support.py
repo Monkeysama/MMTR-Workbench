@@ -5,6 +5,8 @@ import unittest
 
 from inspect_mmtr import inspect_data
 from mmtr_editor.model import Document, EditError
+from mmtr_editor.material_addresses import material_header, material_reads, set_material_header
+from mmtr_editor.material_extension import current_layout
 from mmtr_editor.structure import parse_structure
 from test_structure import fixture
 
@@ -23,6 +25,29 @@ def per_target_fixture(counts=(2, 1, 1, 1)):
 
 
 class TierDHeaderTests(unittest.TestCase):
+    def test_missing_or_unknown_version_preserves_structure_without_guessing_material_header(self):
+        self.addCleanup(set_material_header, material_header())
+        data = per_target_fixture()
+        for path in (Path('synthetic.mmtr'), Path('synthetic.mmtr.999999999')):
+            with self.subTest(path=path):
+                _, info = inspect_data(data, path)
+                self.assertEqual((info['game'], info['material_header_bytes']), ('Unknown', None))
+                doc = Document(data, path)
+                self.assertEqual(doc.build()[0], data)
+                with self.assertRaisesRegex(ValueError, '资源版本'):
+                    material_reads('')
+                # 另一个文档改变兼容全局值后，当前文档仍不能猜测材质地址。
+                Document(data, PATHS[251112994][1])
+                with self.assertRaisesRegex(EditError, '资源版本'):
+                    current_layout(doc, {})
+                with self.assertRaisesRegex(EditError, '资源版本'):
+                    doc.add_cbuffer_member('UserMaterial', 'Added', 4, 16)
+                with self.assertRaisesRegex(EditError, '资源版本'):
+                    doc.remove_cbuffer_member('UserMaterial', 'Value')
+                self.assertEqual(doc.build()[0], data)
+                doc.rename(doc.info['records'][0]['name_offset'], 'Test')
+                self.assertEqual(Document(doc.build()[0], path).info['game'], 'Unknown')
+
     def test_registered_versions_parse_per_target_counts(self):
         data = per_target_fixture()
         for version, (game, path) in PATHS.items():

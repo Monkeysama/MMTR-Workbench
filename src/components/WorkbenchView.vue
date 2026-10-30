@@ -138,7 +138,7 @@ function navigate(id: string) {
               }}</b>
             </div>
             <div class="sidebar-filemeta">
-              {{ gameName(doc.game) }} · {{ doc.resource_version }}<br />{{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
+              {{ gameName(doc.game) }} · {{ doc.resource_version ?? "未提供版本" }}<br />{{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
             </div>
             <ElTag :type="doc.dirty ? 'warning' : 'info'" effect="plain">{{
               doc.dirty

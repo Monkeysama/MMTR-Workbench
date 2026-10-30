@@ -43,8 +43,8 @@ _MATERIAL_HEADER_BYTES = 0
 
 def set_material_header(header_bytes):
     global _MATERIAL_HEADER_BYTES
-    if header_bytes not in (0, 16):
-        raise ValueError('材质数据标记行只支持 0 或 16 字节。')
+    if header_bytes not in (0, 16, None):
+        raise ValueError('材质数据标记行只支持 0、16 字节或未确定。')
     _MATERIAL_HEADER_BYTES = header_bytes
 
 
@@ -122,6 +122,8 @@ def _mesh_table_reads(definitions, origins):
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
 def material_reads(ir, *, include_static=False, graph=None, header_bytes=None):
     header = material_header() if header_bytes is None else header_bytes
+    if header is None:
+        raise ValueError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
     graph = ensure_graph(ir, graph)
     definitions, uses = graph.definitions, graph.uses
     origins = handle_sources(ir, definitions)
