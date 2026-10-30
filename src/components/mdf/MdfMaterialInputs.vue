@@ -57,13 +57,14 @@ watch(() => ({
       <ElTooltip :content="canAddInterfaces ? '从当前关联 MMTR 选择接口' : '请先打开对应 MMTR 并确认当前材质已关联'"><span><ElButton size="small" :disabled="busy || !canAddInterfaces" @click="emit('add-texture')">新增纹理槽</ElButton></span></ElTooltip>
       <ElButton v-if="mmtrLoaded" :disabled="busy" size="small" @click="emit('link')">检查绑定</ElButton>
     </div>
+    <p class="compact-table-hint">左右滚动表格，查看完整参数与输入值。</p>
     <ElTabs v-model="section" class="mdf-data-tabs">
       <ElTabPane :label="`参数 ${properties.length} / ${material.property_count}`" name="input-properties">
         <ElTable :data="properties" row-key="name" height="100%" stripe>
           <ElTableColumn prop="name" label="参数" min-width="144" show-overflow-tooltip />
-          <ElTableColumn prop="offset" label="偏移" width="50" align="right" />
-          <ElTableColumn prop="byte_size" label="字节" width="45" align="right" />
-          <ElTableColumn prop="flags" label="标记" width="46" align="right" />
+          <ElTableColumn prop="offset" label="偏移" width="56" align="right" />
+          <ElTableColumn prop="byte_size" label="字节" width="56" align="right" />
+          <ElTableColumn prop="flags" label="标记" width="56" align="right" />
           <ElTableColumn label="值（自动暂存）" min-width="320" fixed="right"><template #default="{ row }"><MdfPropertyEditor :key="`${material.index}:${row.name}`" :property="row as MdfProperty" :busy="busy" @edit="emit('edit', row.name, $event)" /></template></ElTableColumn>
           <ElTableColumn label="操作" width="58" fixed="right"><template #default="{ row }"><ElTooltip content="删除参数"><ElButton text type="danger" size="small" :disabled="busy" :aria-label="`删除参数 ${row.name}`" @click="emit('delete-property', row.name)"><Trash2 :size="16" /></ElButton></ElTooltip></template></ElTableColumn>
         </ElTable>
@@ -74,3 +75,9 @@ watch(() => ({
     </ElTabs>
   </section>
 </template>
+<style scoped>
+.compact-table-hint { display: none; }
+@media (max-width: 960px) {
+  .compact-table-hint { display: block; margin: 0; padding: 6px 10px; color: var(--muted); font-size: 12px; }
+}
+</style>

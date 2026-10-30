@@ -77,7 +77,7 @@ const emit = defineEmits<{
   color: var(--el-color-primary);
   background: var(--el-fill-color-light);
 }
-.workspace-tab.active { box-shadow: inset 0 -2px var(--el-color-primary); }
+.workspace-tab.active { border-bottom: 2px solid var(--el-color-primary); }
 .workspace-tab.active .workspace-tab-select { color: var(--el-color-primary); }
 .workspace-tab-label { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
 .workspace-tab-dirty { color: var(--el-color-warning); font-size: 12px; }

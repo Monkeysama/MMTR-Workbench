@@ -10,6 +10,7 @@ import {
   ElTag,
   ElTooltip,
   ElAlert,
+  ElDrawer,
 } from "element-plus";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import {
@@ -27,6 +28,7 @@ import {
   ShieldCheck,
   LoaderCircle,
   FileKey,
+  Menu,
 } from "lucide-vue-next";
 import { useWorkbench } from "../composables/useWorkbench";
 import { basename, bytes, type Tab, type DocumentTab, type DocumentState, type DocumentController } from "../types";
@@ -73,10 +75,11 @@ const {
 } = wb;
 const settings = shallowRef(false);
 const support = shallowRef(false);
+const navigation = shallowRef(false);
 // 父容器只读取生命周期摘要；编辑状态与异步回调始终属于当前固定文档。
 watch((): DocumentState => ({ source: doc.value?.source ?? null, mdfSource: mdfDoc.value?.source ?? null,
   dirty: wb.dirty.value, busy: busy.value || wb.mdfSaving.value,
-  modal: !!dialog.value || settings.value || support.value || wb.materialBatch.visible.value || wb.materialRemoval.visible.value,
+  modal: !!dialog.value || settings.value || support.value || navigation.value || wb.materialBatch.visible.value || wb.materialRemoval.visible.value,
 }), state => emit("state", state), { immediate: true, flush: "sync" });
 const nav: { id: Tab; label: string; icon: typeof Layers3 }[] = [
   { id: "overview", label: "文件概览", icon: LayoutDashboard },
@@ -97,6 +100,10 @@ const descriptions: Record<Tab, string> = {
 };
 function navigate(id: string) {
   tab.value = id as Tab;
+  navigation.value = false;
+}
+function unavailable(id: Tab) {
+  return (id === "mdf" && !mdfDoc.value) || (!doc.value && !["overview", "source", "mdf"].includes(id));
 }
 </script>
 
@@ -116,7 +123,7 @@ function navigate(id: string) {
             :key="item.id"
             :index="item.id"
             :aria-label="item.label"
-            :disabled="(item.id === 'mdf' && !mdfDoc) || (!doc && item.id !== 'overview' && item.id !== 'source' && item.id !== 'mdf')"
+            :disabled="unavailable(item.id)"
           >
             <component :is="item.icon" :size="19" /><span>{{
               item.label
@@ -158,11 +165,12 @@ function navigate(id: string) {
       </aside>
       <div class="main-shell">
         <header class="topbar">
+          <ElButton class="navigation-toggle" text aria-label="页面导航" :aria-expanded="navigation" @click="navigation = true"><Menu :size="20" /></ElButton>
           <DocumentTabs
             :tabs="props.tabs"
             :active-id="props.documentId"
             :active="props.active"
-            :disabled="props.workspaceBusy || !!dialog || settings || support || wb.materialBatch.visible.value || wb.materialRemoval.visible.value"
+            :disabled="props.workspaceBusy || !!dialog || settings || support || navigation || wb.materialBatch.visible.value || wb.materialRemoval.visible.value"
             @select="emit('select', $event)"
             @close="emit('close', $event)"
             @create="emit('create')"
@@ -180,11 +188,12 @@ function navigate(id: string) {
             >
           </div>
         </header>
+        <div class="workspace-sheet">
         <div v-if="doc" class="document-bar">
           <span class="document-path" :title="doc.source">{{
             doc.source
           }}</span>
-          <ElTag :type="integrityOk ? 'primary' : 'warning'" effect="plain"
+          <ElTag :type="integrityOk ? 'success' : 'warning'" effect="plain"
             ><ShieldCheck :size="14" />{{
               integrityOk ? "Hash 已验证" : "Hash 存在差异"
             }}</ElTag
@@ -209,8 +218,8 @@ function navigate(id: string) {
         <main class="main-content">
           <div class="page-heading">
             <div>
-              <h1>{{ heading.label }}</h1>
-              <p>{{ descriptions[tab] }}</p>
+              <h1>{{ !doc && !mdfDoc && tab === 'overview' ? '材质与着色器工作台' : heading.label }}</h1>
+              <p>{{ !doc && !mdfDoc && tab === 'overview' ? '检查 RE Engine 材质，追踪每一个着色阶段。' : descriptions[tab] }}</p>
             </div>
             <ElTag v-if="doc && doc.dirty" type="warning" effect="light"
               >{{ changeCount }} 项修改{{
@@ -305,39 +314,25 @@ function navigate(id: string) {
           />
           <section v-else class="welcome">
             <div class="welcome-header">
-              <span class="welcome-symbol"><Layers3 :size="44" /></span>
-              <h2>MMTR Workbench</h2>
-              <p>检查、编辑与重建 RE Engine 的 MMTR 着色器包与 MDF 材质</p>
-              <p class="secondary-text">已登记 16 个 MMTR 资源版本与 9 个 MDF 版本；各游戏证据等级不同。</p>
+              <h2>检查 Shader，编辑材质</h2>
+              <p>查看渲染通道与着色代码，调整材质参数和贴图。</p>
               <div class="welcome-actions">
                 <ElButton type="primary" size="large" :disabled="busy" @click="wb.openFile()"
                   ><FolderOpen :size="19" />打开 MMTR 文件</ElButton
-                ><ElButton size="large" @click="support = true"
-                  ><ShieldCheck :size="18" />查看支持范围</ElButton
+                ><ElButton size="large" :disabled="busy || props.workspaceBusy" @click="wb.openMdf()"
+                  ><FileKey :size="18" />打开 MDF 文件</ElButton
                 >
               </div>
             </div>
-            <div class="welcome-grid">
-              <div>
-                <Workflow :size="24" />
-                <h3>追踪渲染通道</h3>
-                <p>按分组筛选通道，定位每个阶段的编译块。</p>
-              </div>
-              <div>
-                <Code2 :size="24" />
-                <h3>检查着色器</h3>
-                <p>查看 DXIL 反汇编，导入 DXBC 或编译 HLSL。</p>
-              </div>
-              <div>
-                <Database :size="24" />
-                <h3>浏览材质布局</h3>
-                <p>查找参数、资源名称和缓冲区偏移。</p>
-              </div>
-            </div>
+            <dl class="file-relationships">
+              <div><dt>MMTR<span>着色器包</span></dt><dd>渲染通道 <span aria-hidden="true">→</span> 编译着色器<br /><span>查看 DXIL、参数布局与资源绑定。</span></dd></div>
+              <div><dt>MDF<span>材质配置</span></dt><dd>材质实例 <span aria-hidden="true">→</span> MMTR<br /><span>编辑参数数值、贴图路径与主材质。</span></dd></div>
+            </dl>
             <div class="welcome-note">
               <ShieldCheck :size="18" /><span
-                >编辑在内存中暂存，另存导出时写入独立文件。支持范围以登记版本为准，合成测试不等于游戏内验证。</span
+                >修改暂存在内存中，通过另存导出生成独立文件。</span
               >
+              <ElButton text @click="support = true">查看支持游戏</ElButton>
             </div>
           </section>
         </main>
@@ -357,7 +352,19 @@ function navigate(id: string) {
               : "准备就绪"
           }}</span>
         </footer>
+        </div>
       </div>
+      <ElDrawer v-model="navigation" title="工作空间" direction="ltr" size="260px" class="navigation-drawer">
+        <ElMenu class="workspace-menu" :default-active="tab" @select="navigate">
+          <ElMenuItem v-for="item in nav" :key="item.id" :index="item.id" :disabled="unavailable(item.id)">
+            <component :is="item.icon" :size="18" /><span>{{ item.label }}</span>
+          </ElMenuItem>
+        </ElMenu>
+        <div class="drawer-tools">
+          <ElButton text @click="navigation = false; support = true"><ShieldCheck :size="18" />支持范围</ElButton>
+          <ElButton text @click="navigation = false; settings = true"><Settings2 :size="18" />工具设置</ElButton>
+        </div>
+      </ElDrawer>
       <SupportMatrix
         v-if="props.active"
         v-model="support"

@@ -12,9 +12,6 @@ import {
 } from "element-plus";
 import {
   ShieldCheck,
-  Boxes,
-  Workflow,
-  Database,
   ArrowUpRight,
 } from "lucide-vue-next";
 import { bytes, type DocumentInfo } from "../types";
@@ -55,7 +52,7 @@ const groups = computed(() =>
       <ElButton class="metric-card" @click="emit('navigate', 'passes')"
         ><span class="metric-content"
           ><span class="metric-label"
-            ><Workflow :size="19" />渲染通道<ArrowUpRight :size="16" /></span
+            >渲染通道<ArrowUpRight :size="15" /></span
           ><strong>{{ doc.record_count.toLocaleString() }}</strong
           ><span class="metric-detail"
             >{{ doc.candidate_groups.length }} 个分组</span
@@ -65,7 +62,7 @@ const groups = computed(() =>
       <ElButton class="metric-card" @click="emit('navigate', 'shaders')"
         ><span class="metric-content"
           ><span class="metric-label"
-            ><Boxes :size="19" />编译着色器<ArrowUpRight :size="16" /></span
+            >编译着色器<ArrowUpRight :size="15" /></span
           ><strong>{{ doc.shader_count }}</strong
           ><span class="metric-detail">DXBC / DXIL 编译块</span></span
         ></ElButton
@@ -73,7 +70,7 @@ const groups = computed(() =>
       <ElButton class="metric-card" @click="emit('navigate', 'metadata')"
         ><span class="metric-content"
           ><span class="metric-label"
-            ><Database :size="19" />材质参数<ArrowUpRight :size="16" /></span
+            >材质参数<ArrowUpRight :size="15" /></span
           ><strong>{{ material.length }}</strong
           ><span class="metric-detail"
             >UserMaterial · {{ materialSize }} B</span
@@ -82,7 +79,7 @@ const groups = computed(() =>
       >
       <div class="metric-card integrity-card">
         <span class="metric-label"><ShieldCheck :size="19" />完整性检查</span
-        ><strong :class="integrityOk ? 'primary-text' : 'warning-text'">{{
+        ><strong :class="integrityOk ? 'success-text' : 'warning-text'">{{
           integrityOk ? "全部匹配" : "存在差异"
         }}</strong
         ><span class="metric-detail"
@@ -144,7 +141,7 @@ const groups = computed(() =>
               :percentage="(count / doc.shader_count) * 100"
               :stroke-width="8"
               :show-text="false"
-              color="#4776d0"
+              color="var(--data-accent)"
             /><span class="stage-count">{{ count }}</span>
           </div>
         </div>
@@ -164,7 +161,7 @@ const groups = computed(() =>
         <h2>分组分布</h2>
         <span class="secondary-text">组索引与 Shader Model 独立</span>
       </div>
-      <ElTable :data="groups" stripe
+      <ElTable :data="groups"
         ><ElTableColumn label="分组" width="120"
           ><template #default="{ row }"
             ><ElTag type="info" effect="plain"
@@ -174,9 +171,11 @@ const groups = computed(() =>
         ><ElTableColumn
           prop="record_count"
           label="通道"
+          align="right"
           width="110" /><ElTableColumn
           prop="unique_shader_count"
           label="独立着色器"
+          align="right"
           width="135" /><ElTableColumn
           prop="models"
           label="Shader Model"

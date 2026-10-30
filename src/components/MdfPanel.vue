@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
+import { ArrowLeft } from "lucide-vue-next";
 import { ElButton, ElInput, ElTable, ElTableColumn, ElTabs, ElTabPane, ElTag, ElCheckbox } from "element-plus";
 import { basename, bytes, type MdfDocument, type MdfMaterialSummary, type MdfSetting } from "../types";
 import MdfMaterialInputs from "./mdf/MdfMaterialInputs.vue";
@@ -10,6 +11,7 @@ import MdfMaterialSettings from "./mdf/MdfMaterialSettings.vue";
 const props = defineProps<{ doc: MdfDocument; mmtrLoaded: boolean; busy: boolean; saving: boolean }>();
 const emit = defineEmits<{ select: [index: number]; link: []; edit: [name: string, components: Record<number, number>]; texture: [slot: number, path: string]; "add-property": []; "delete-property": [name: string]; "add-texture": []; "delete-texture": [slot: number]; setting: [field: MdfSetting, value: number]; export: []; reset: []; migrate: []; report: [] }>();
 const query = shallowRef("");
+const detailOpen = shallowRef(false);
 const onlyLinked = shallowRef(true);
 const detailTab = shallowRef(props.doc.migration ? "migration" : "inputs");
 const linkageKnown = computed(() => !props.mmtrLoaded || props.doc.materials.some(row => row.mmtr_linked !== undefined));
@@ -20,6 +22,12 @@ const materials = computed(() => props.doc.materials.filter(row =>
 const selectedVisible = computed(() => !!props.doc.selected && (!props.mmtrLoaded || !onlyLinked.value || !linkageKnown.value || props.doc.selected.mmtr_linked === true));
 const bindingLabel = (status?: string) => ({ ok: "布局匹配", compatible_with_reserves: "保留成员兼容", review_required: "绑定需检查" }[status ?? ""] ?? "未关联 MMTR");
 function inspectBinding() { detailTab.value = "binding"; emit("link"); }
+// 窄窗口只切换展示面板，实际材质选择仍由父级文档管理。
+function selectMaterial(index: number) {
+  if (props.busy) return;
+  detailOpen.value = true;
+  emit("select", index);
+}
 </script>
 
 <template>
@@ -32,13 +40,14 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
       <span v-if="saving" class="secondary-text" role="status">正在暂存…</span>
       <div class="mdf-file-actions"><ElButton :disabled="busy || !(doc.dirty || saving)" size="small" @click="emit('reset')">撤销全部修改</ElButton><ElButton :disabled="busy" size="small" type="primary" @click="emit('export')">另存 MDF</ElButton></div>
     </div>
-    <div class="mdf-layout">
+    <ElButton v-if="detailOpen" class="mdf-back" text @click="detailOpen = false"><ArrowLeft :size="16" />返回材质列表</ElButton>
+    <div class="mdf-layout" :class="{ 'show-material-detail': detailOpen }">
       <section class="panel mdf-material-list">
         <div class="panel-heading"><h2>材质</h2><span class="secondary-text">{{ materials.length }} / {{ doc.material_count }}</span><ElCheckbox v-model="onlyLinked" :disabled="!mmtrLoaded" size="small">仅显示关联材质</ElCheckbox></div>
         <div class="mdf-search"><ElInput v-model="query" size="small" clearable placeholder="搜索材质或 MMTR" aria-label="搜索材质" /></div>
-        <ElTable :data="materials" height="100%" stripe highlight-current-row row-key="index" :current-row-key="doc.selected?.index" @row-click="(row: MdfMaterialSummary) => !busy && emit('select', row.index)">
+        <ElTable :data="materials" height="100%" highlight-current-row row-key="index" :current-row-key="doc.selected?.index" @row-click="(row: MdfMaterialSummary) => selectMaterial(row.index)">
           <ElTableColumn prop="index" label="#" width="42" />
-          <ElTableColumn prop="name" label="材质名称" min-width="150" show-overflow-tooltip />
+          <ElTableColumn prop="name" label="材质名称" min-width="150" show-overflow-tooltip><template #default="{ row }"><ElButton text :disabled="busy" @click.stop="selectMaterial(row.index)">{{ row.name }}</ElButton></template></ElTableColumn>
         </ElTable>
       </section>
       <section v-if="doc.selected && selectedVisible" class="panel mdf-detail">
@@ -82,7 +91,7 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
 .mdf-workspace :deep(.mdf-feature .el-table .el-table__cell:not(:last-child)) { border-right: 1px solid #dce1e8; }
 .mdf-workspace :deep(.mdf-feature .el-table th.el-table__cell) { color: #4c5868; font-weight: 600; }
 .mdf-workspace :deep(.mdf-feature .el-table td.el-table__cell:first-child) { color: #273447; font-weight: 500; }
-.mdf-workspace :deep(.mdf-feature .el-table td.is-right) { color: #7b8491; font-family: Consolas, monospace; font-size: 12px; }
+.mdf-workspace :deep(.mdf-feature .el-table td.is-right) { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
 .mdf-search { padding: 7px 8px; border-bottom: 1px solid #e8ebf0; }
 .mdf-material-list > .el-table { flex: 1; min-height: 0; }
 .mdf-selected-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px 5px; }
@@ -95,13 +104,13 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
 .mdf-detail-tabs > :deep(.el-tabs__content) { flex: 1; min-height: 0; }
 .mdf-detail-tabs > :deep(.el-tabs__content > .el-tab-pane) { height: 100%; }
 .mdf-workspace :deep(.el-tabs__item) { height: 34px; font-size: 13px; }
-.mdf-workspace :deep(.el-table) { font-size: 13px; }
+.mdf-workspace :deep(.el-table) { font-size: 14px; }
 .mdf-workspace :deep(.el-table .el-table__cell) { padding: 4px 0; }
 .mdf-workspace :deep(.mdf-inputs-region .el-table .el-table__cell) { padding: 3px 0; }
 .mdf-workspace :deep(.el-table th.el-table__cell) { height: 32px; }
 .mdf-workspace :deep(.el-table .cell) { line-height: 22px; padding: 0 9px; }
 .mdf-workspace :deep(.el-table__body tr) { cursor: pointer; }
-.mdf-workspace :deep(.el-table .current-row td:first-child) { box-shadow: inset 3px 0 #3567c8; }
+.mdf-workspace :deep(.el-table .current-row td:first-child) { border-left: 3px solid var(--data-accent); }
 .mdf-workspace :deep(.mono) { font-size: 13px; font-variant-numeric: tabular-nums; }
 .mdf-workspace :deep(.secondary-text) { font-size: 12px; }
 .mdf-workspace :deep(.panel-heading) { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
@@ -122,4 +131,14 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
 .mdf-workspace :deep(.mdf-note) { margin: 0; padding: 7px 10px; font-size: 12px; color: #697588; border-bottom: 1px solid #e8ebf0; }
 .mdf-workspace :deep(.mdf-empty) { padding: 20px; color: #697588; font-size: 13px; }
 @media (max-width: 1200px) { .mdf-layout { grid-template-columns: 200px minmax(0, 1fr); } }
+.mdf-back { display: none; }
+@media (max-width: 960px) {
+  .mdf-layout { grid-template-columns: minmax(0, 1fr); }
+  .mdf-detail, .show-material-detail .mdf-material-list { display: none; }
+  .show-material-detail .mdf-detail { display: flex; }
+  .mdf-back { display: inline-flex; align-self: flex-start; }
+  .mdf-file-strip strong { max-width: 100%; }
+  .mdf-workspace { min-height: 620px; }
+  .mdf-workspace :deep(.el-table-fixed-column--right) { position: static !important; }
+}
 </style>

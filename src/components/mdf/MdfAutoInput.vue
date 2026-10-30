@@ -37,6 +37,6 @@ function cancel() {
   <ElInput v-model="draft" class="mdf-auto-input" :class="{ 'is-invalid': message }" size="small" :aria-label="label" :aria-invalid="!!message" :title="message || draft" :disabled="busy" :inputmode="numeric ? 'decimal' : 'text'" @input="message = ''" @change="save" @blur="save" @keydown.enter.prevent="save" @keydown.esc.prevent="cancel" />
 </template>
 <style scoped>
-.mdf-auto-input :deep(input) { font-family: Consolas, monospace; font-size: 12px; height: 24px; line-height: 24px; }
-.mdf-auto-input.is-invalid :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #b94141 inset; }
+.mdf-auto-input :deep(input) { font-family: inherit; font-size: 13px; height: 26px; line-height: 26px; font-variant-numeric: tabular-nums; }
+.mdf-auto-input.is-invalid :deep(.el-input__wrapper) { outline: 1px solid var(--el-color-danger); outline-offset: -1px; }
 </style>

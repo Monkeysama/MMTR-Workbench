@@ -21,6 +21,7 @@ import {
   Code2,
   Undo2,
   FileCode2,
+  ArrowLeft,
 } from "lucide-vue-next";
 import { hex, bytes, type DocumentInfo, type Shader } from "../types";
 import CodeViewer from "./CodeViewer.vue";
@@ -43,6 +44,7 @@ const search = shallowRef(""),
   stage = shallowRef("all"),
   detailTab = shallowRef("readable"),
   irFocusLine = shallowRef(0);
+const detailOpen = shallowRef(!!props.selected);
 const rows = computed(() =>
   props.doc.shaders.filter(
     (s) =>
@@ -60,6 +62,7 @@ watch(
   () => {
     detailTab.value = "readable";
     irFocusLine.value = 0;
+    detailOpen.value = !!props.selected;
   },
 );
 function inspect(irLine: number) {
@@ -67,12 +70,15 @@ function inspect(irLine: number) {
   irFocusLine.value = irLine;
 }
 function select(row: Shader) {
-  if (!props.busy) emit("select", row.index);
+  if (!props.busy) {
+    detailOpen.value = true;
+    emit("select", row.index);
+  }
 }
 </script>
 <template>
-  <ElSplitter class="shader-layout">
-    <ElSplitterPanel size="32%" :min="260" :max="540">
+  <ElSplitter class="shader-layout" :class="{ 'show-shader-detail': detailOpen }">
+    <ElSplitterPanel class="shader-master-pane" size="32%" :min="260" :max="540">
       <section class="panel shader-list">
         <div class="shader-filter">
           <ElInput
@@ -134,8 +140,9 @@ function select(row: Shader) {
         </ElTable>
       </section>
     </ElSplitterPanel>
-    <ElSplitterPanel :min="340">
+    <ElSplitterPanel class="shader-detail-pane" :min="340">
       <section class="panel shader-inspector">
+        <ElButton class="shader-back" text @click="detailOpen = false"><ArrowLeft :size="16" />返回着色器列表</ElButton>
         <template v-if="selected">
           <div class="inspector-heading">
             <div>

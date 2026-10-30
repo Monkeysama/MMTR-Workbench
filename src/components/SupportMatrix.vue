@@ -109,7 +109,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
     <div ref="body" class="support-body">
       <section v-if="doc" class="support-current">
         <div class="support-current-head">
-          <div><span class="support-kicker">当前文件</span><strong>{{ gameName(doc.game) }} · {{ doc.resource_version ?? "未提供版本" }}</strong></div>
+          <div><strong>{{ gameName(doc.game) }} · {{ doc.resource_version ?? "未提供版本" }}</strong></div>
           <ElTag :type="currentEvidence?.type ?? 'info'" effect="plain">{{ currentEvidence?.label ?? "未登记版本" }}</ElTag>
         </div>
         <div class="support-current-grid">
@@ -162,14 +162,13 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 </template>
 
 <style scoped>
-.support-title { display: flex; align-items: flex-start; gap: 12px; color: #3567c8; }
+.support-title { display: flex; align-items: flex-start; gap: 12px; color: var(--ink); }
 .support-title h2 { margin: 0; color: #29364b; font-size: 21px; }
 .support-title p { margin: 4px 0 0; color: #697588; font-size: 14px; }
 .support-body { max-height: 70vh; overflow: auto; padding-right: 4px; }
-.support-current { border: 1px solid #d7e0ef; background: #f7f9fd; border-radius: 6px; padding: 16px 18px; margin-bottom: 16px; }
+.support-current { border: 1px solid var(--edge); background: var(--surface-muted); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; }
 .support-current-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .support-current-head strong { display: block; margin-top: 4px; color: #29364b; font-size: 17px; }
-.support-kicker { color: #697588; font-size: 13px; }
 .support-current-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 14px; }
 .support-current-grid small, .support-current-grid b { display: block; }
 .support-current-grid small { color: #718097; font-size: 12px; margin-bottom: 3px; }
@@ -181,7 +180,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 .support-section-title { color: #29364b; font-size: 15px; margin: 20px 0 10px; }
 .support-table-wrap { border: 1px solid #e1e5eb; border-radius: 6px; overflow-x: auto; }
 .support-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
-.support-table th { text-align: left; font-weight: 600; color: #526174; background: #f5f6f8; padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
+.support-table th { text-align: left; font-weight: 600; color: #526174; background: var(--surface); padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
 .support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid #edf0f4; color: #30343b; line-height: 1.6; }
 .support-table td.mono { white-space: nowrap; }
 .support-table td.support-version-cell { white-space: pre-line; }
@@ -190,8 +189,9 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 .support-table td:first-child b { display: block; font-weight: 600; }
 .support-table td:first-child small { color: #3567c8; font-size: 12px; }
 .support-footnote { color: #718097; font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
-.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.mono { font-variant-numeric: tabular-nums; font-size: 13px; }
 @media (max-width: 720px) {
   .support-current-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .support-current-head { flex-wrap: wrap; }
 }
 </style>

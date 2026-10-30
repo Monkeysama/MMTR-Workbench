@@ -15,7 +15,7 @@ function save() { if (!props.busy && draft.value !== props.value) emit("save", d
 </template>
 <style scoped>
 .mdf-editable { display: flex; align-items: center; gap: 5px; }
-.mdf-editable :deep(input) { font-family: Consolas, monospace; font-size: 12px; }
+.mdf-editable :deep(input) { font-family: inherit; font-size: 13px; font-variant-numeric: tabular-nums; }
 .mdf-editable :deep(.el-input__inner) { height: 24px; line-height: 24px; }
 .mdf-editable .el-button { margin: 0; padding: 0 6px; }
 </style>
