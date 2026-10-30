@@ -11,10 +11,11 @@ from mmtr_editor.dxc import Dxc
 from mmtr_editor.model import Document, EditError, validate_shader
 from mmtr_editor.rpc import Service
 from mmtr_editor.hashes import murmur3_x86_32, xxh64
+from tests.local_corpus import MHWILDS_VARIATION
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLES = Path('F:/MH Wilds/Game Unpack/MHWILDS_EXTRACT/re_chunk_000/natives/STM/MaterialShader/Variation')
-VARIATION = Path('F:/MH Wilds/Game Unpack/MHWILDS_EXTRACT/natives/STM/MaterialShader/Variation')
+SAMPLES = MHWILDS_VARIATION
+VARIATION = MHWILDS_VARIATION
 DLL = Path('C:/Software/Kiro/dxcompiler.dll')
 
 

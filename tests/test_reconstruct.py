@@ -7,12 +7,13 @@ from mmtr_editor.reconstruct import reconstruct_hlsl, ReconstructionError
 from mmtr_editor.dxc import Dxc, reflection_differences
 from mmtr_editor.rpc import Service
 from scripts.verify_reconstruction import normalized_body
+from tests.local_corpus import MHWILDS_VARIATION
 
 ROOT = Path(__file__).resolve().parents[1]
 CANDIDATES = ROOT / 'output/variation_scan/candidates'
 SIMPLE = CANDIDATES / 'ad5f36212bb73a035f606dbfb791bb7d9ebae94b274f8454542747f7d62e707f'
 DLL = Path('C:/Software/Kiro/dxcompiler.dll')
-SKIN = Path('F:/MH Wilds/Game Unpack/MHWILDS_EXTRACT/re_chunk_000/natives/STM/MaterialShader/Variation/Base_ATOS_SkinEdit_VFX.mmtr.250206176')
+SKIN = MHWILDS_VARIATION / 'Base_ATOS_SkinEdit_VFX.mmtr.250206176'
 
 
 @unittest.skipUnless((SIMPLE / 'original.ll').exists(), 'Run Variation scan to obtain corpus fixture')

@@ -7,9 +7,10 @@ from inspect_mmtr import inspect_data
 from mmtr_editor.dxc import Dxc
 from mmtr_editor.model import Document, EditError
 from mmtr_editor.rpc import Service
+from tests.local_corpus import MHWILDS_VARIATION
 
 
-MMTR = Path(r"F:\MH Wilds\Game Unpack\MHWILDS_EXTRACT\natives\STM\MaterialShader\Variation\VFX_Transparent_SFC_Hand.mmtr.240906211")
+MMTR = MHWILDS_VARIATION / 'VFX_Transparent_SFC_Hand.mmtr.240906211'
 DXC = Path(r"C:\Software\Kiro\dxcompiler.dll")
 
 
