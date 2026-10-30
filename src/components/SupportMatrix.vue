@@ -58,13 +58,11 @@ const rows: SupportRow[] = [
     evidence: "synthetic", note: "无本机原版语料" },
   { id: "sf6", name: "Street Fighter 6", games: ["SF6"], versions: [221102761, 250109895], mdf: "2.31",
     evidence: "synthetic", note: "无本机原版语料" },
-  { id: "dd2-old", name: "Dragon's Dogma 2 (legacy)", games: ["DD2"], versions: [240112003, 240423143], mdf: "—",
-    evidence: "synthetic", note: "MDF 未开放" },
+  { id: "dd2", name: "Dragon's Dogma 2", games: ["DD2"], versions: [240112003, 240423143, 260511270],
+    mdf: "240112003、240423143：未登记\n260511270：2.51（待确认）", evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "re9", name: "Resident Evil Requiem", games: ["RE9"], versions: [251112994], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "pragmata", name: "Pragmata", games: ["PRAGMATA"], versions: [251112995], mdf: "2.51",
-    evidence: "mmtr", note: "MDF 2.51 未单独验证" },
-  { id: "dd2-current", name: "Dragon's Dogma 2 (current)", games: ["DD2"], versions: [260511270], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
 ];
 
@@ -75,8 +73,11 @@ const currentRow = computed(() => {
     row.games.includes(doc.game) && doc.resource_version !== null && row.versions.includes(doc.resource_version)) ?? null;
 });
 const wildsAlternate = computed(() => props.doc?.game === "MHWilds" && props.doc.resource_version === 250206176);
-const currentEvidence = computed(() => currentRow.value ? evidence[wildsAlternate.value ? "corpus" : currentRow.value.evidence] : null);
-const currentNote = computed(() => wildsAlternate.value ? "真实样本已验证解析与重建；本次未进行游戏内测试" : currentRow.value?.note);
+const dd2Legacy = computed(() => props.doc?.game === "DD2" &&
+  (props.doc.resource_version === 240112003 || props.doc.resource_version === 240423143));
+const currentEvidence = computed(() => currentRow.value ? evidence[wildsAlternate.value ? "corpus" : dd2Legacy.value ? "synthetic" : currentRow.value.evidence] : null);
+const currentNote = computed(() => wildsAlternate.value ? "真实样本已验证解析与重建；本次未进行游戏内测试" :
+  dd2Legacy.value ? "MDF 未开放" : currentRow.value?.note);
 const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${props.mdfVersion}`);
 </script>
 
@@ -120,13 +121,13 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
             <tr v-for="row in rows" :key="row.id" :class="{ 'is-current': currentRow?.id === row.id }">
               <td><b>{{ row.name }}</b><small v-if="currentRow?.id === row.id">当前</small></td>
               <td class="mono">{{ row.versions.join(" / ") }}</td>
-              <td class="mono">{{ row.mdf }}</td>
+              <td class="mono support-mdf-cell">{{ row.mdf }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem、Pragmata、Dragon's Dogma 2 (current) 的真实文件布局尚未核实。</p>
+      <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem、Pragmata、Dragon's Dogma 2（MMTR 260511270）的真实文件布局尚未核实。</p>
     </div>
     <template #footer><ElButton @click="emit('update:modelValue', false)">关闭</ElButton></template>
   </ElDialog>
@@ -154,6 +155,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 .support-table th { text-align: left; font-weight: 600; color: #526174; background: #f5f6f8; padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
 .support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid #edf0f4; color: #30343b; line-height: 1.6; }
 .support-table td.mono { white-space: nowrap; }
+.support-table td.support-mdf-cell { white-space: pre-line; }
 .support-table tr:last-child td { border-bottom: 0; }
 .support-table tr.is-current td { background: #edf2fc; }
 .support-table td:first-child b { display: block; font-weight: 600; }
