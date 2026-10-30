@@ -43,27 +43,39 @@ const rows: SupportRow[] = [
   { id: "mhwilds", name: "Monster Hunter Wilds", games: ["MHWilds"], versions: [240906211, 250206176], mdf: "2.45",
     evidence: "game", note: "真实语料与游戏内验证" },
   { id: "re4", name: "Resident Evil 4", games: ["RE4"], versions: [221007879], mdf: "2.32",
-    evidence: "existing", note: "v0.4.2 既有范围，本轮未重验" },
+    evidence: "existing", note: "" },
   { id: "onimusha", name: "Onimusha: Way of the Sword", games: ["ONIMUSHAWOTS", "ONIMUSHAWOTSDEMO"], versions: [260605155, 251112814], mdf: "2.51",
-    evidence: "author", note: "作者报告 550 个 MMTR、33 个 MDF 通过；含 Demo" },
+    evidence: "author", note: "未单独验证" },
   { id: "mhrise", name: "Monster Hunter Rise", games: ["MHRISE"], versions: [220427553], mdf: "2.23",
-    evidence: "corpus", note: "3 个真实 MMTR 与提取 MDF；未进游戏" },
+    evidence: "corpus", note: "未单独验证" },
   { id: "re8", name: "Resident Evil Village", games: ["RE8"], versions: [2102188797], mdf: "2.19",
-    evidence: "synthetic", note: "无本机原版语料" },
+    evidence: "synthetic", note: "未单独验证" },
   { id: "re2rt", name: "Resident Evil 2 (Ray Tracing)", games: ["RE2RT"], versions: [2109101635], mdf: "2.21",
-    evidence: "synthetic", note: "无本机原版语料" },
+    evidence: "synthetic", note: "未单独验证" },
   { id: "re2", name: "Resident Evil 2", games: ["RE2"], versions: [1808160001], mdf: "2.10",
-    evidence: "synthetic", note: "无本机原版语料" },
+    evidence: "synthetic", note: "未单独验证" },
   { id: "re3", name: "Resident Evil 3", games: ["RE3"], versions: [1905100741], mdf: "2.13",
-    evidence: "synthetic", note: "无本机原版语料" },
+    evidence: "synthetic", note: "未单独验证" },
   { id: "sf6", name: "Street Fighter 6", games: ["SF6"], versions: [221102761, 250109895], mdf: "2.31",
-    evidence: "synthetic", note: "无本机原版语料" },
+    evidence: "synthetic", note: "未单独验证" },
   { id: "dd2", name: "Dragon's Dogma 2", games: ["DD2"], versions: [240112003, 240423143, 260511270],
-    mdf: "240112003、240423143：未登记\n260511270：2.51（待确认）", evidence: "mmtr", note: "MDF 2.51 未单独验证" },
+    mdf: "2.51（待确认）", evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "re9", name: "Resident Evil Requiem", games: ["RE9"], versions: [251112994], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "pragmata", name: "Pragmata", games: ["PRAGMATA"], versions: [251112995], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
+];
+
+const unregisteredRows = [
+  { name: "Resident Evil 7", mmtr: "69（原版）\n220128762（Ray Tracing）", mdf: "2.6（原版，未登记）\n2.21（Ray Tracing，版本已登记）" },
+  { name: "Devil May Cry 5", mmtr: "1808168797", mdf: "2.10（版本已登记）" },
+  { name: "Resident Evil 3 (Ray Tracing)", mmtr: "2109101635（与 Resident Evil 2 RT 共用）", mdf: "2.21（版本已登记）" },
+  { name: "Resident Evil Resistance", mmtr: "1905100741（与 Resident Evil 3 共用）", mdf: "2.13（版本已登记）" },
+  { name: "Resident Evil Re:Verse", mmtr: "待确认", mdf: "2.20（未登记）" },
+  { name: "Kunitsu-Gami: Path of the Goddess", mmtr: "240312225", mdf: "2.40（未登记）" },
+  { name: "Dead Rising Deluxe Remaster", mmtr: "240405143", mdf: "2.40（未登记）" },
+  { name: "Onimusha 2: Samurai's Destiny", mmtr: "240909130", mdf: "2.46（未登记）" },
+  { name: "Monster Hunter Stories 3: Twisted Reflection", mmtr: "250905804", mdf: "2.49（未登记）" },
 ];
 
 const currentRow = computed(() => {
@@ -91,7 +103,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
     @opened="resetScroll"
   >
     <template #header>
-      <div class="support-title"><ShieldCheck :size="22" /><div><h2>支持范围</h2><p>MMTR 与 MDF 的已登记版本</p></div></div>
+      <div class="support-title"><ShieldCheck :size="22" /><div><h2>支持范围</h2><p>MMTR 与 MDF 游戏版本</p></div></div>
     </template>
 
     <div ref="body" class="support-body">
@@ -112,8 +124,9 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
       </section>
       <p v-else class="support-empty">打开 MMTR 文件后，这里会显示当前文件的格式版本。</p>
 
-      <p class="support-intro">“支持”指工具能按已知布局解析并编辑；它不等于该游戏、材质或 Shader 组合已在游戏内加载通过。表中只列已登记版本，“—”表示该栏未开放。</p>
+      <p class="support-intro">“支持”指工具能按已知布局解析并编辑；它不等于该游戏、材质或 Shader 组合已在游戏内加载通过。</p>
 
+      <h3 class="support-section-title">已登记游戏</h3>
       <div class="support-table-wrap">
         <table class="support-table">
           <thead><tr><th>游戏</th><th>MMTR 版本</th><th>MDF 版本</th></tr></thead>
@@ -121,13 +134,28 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
             <tr v-for="row in rows" :key="row.id" :class="{ 'is-current': currentRow?.id === row.id }">
               <td><b>{{ row.name }}</b><small v-if="currentRow?.id === row.id">当前</small></td>
               <td class="mono">{{ row.versions.join(" / ") }}</td>
-              <td class="mono support-mdf-cell">{{ row.mdf }}</td>
+              <td class="mono support-version-cell">{{ row.mdf }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem、Pragmata、Dragon's Dogma 2（MMTR 260511270）的真实文件布局尚未核实。</p>
+
+      <h3 class="support-section-title">未单独登记或未核实的游戏</h3>
+      <p class="support-intro">版本号是游戏文件后缀，不代表已支持。“版本已登记”表示其他游戏使用相同编号，本游戏尚未核验；“待确认”表示文件及版本尚未核实。</p>
+      <div class="support-table-wrap">
+        <table class="support-table">
+          <thead><tr><th>游戏</th><th>MMTR 版本</th><th>MDF 版本</th></tr></thead>
+          <tbody>
+            <tr v-for="row in unregisteredRows" :key="row.name">
+              <td><b>{{ row.name }}</b></td>
+              <td class="mono support-version-cell">{{ row.mmtr }}</td>
+              <td class="mono support-version-cell">{{ row.mdf }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <template #footer><ElButton @click="emit('update:modelValue', false)">关闭</ElButton></template>
   </ElDialog>
@@ -150,12 +178,13 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 .support-warn { color: #a15c00; }
 .support-empty { color: #697588; font-size: 14px; margin: 0 0 14px; }
 .support-intro { color: #697588; font-size: 13px; line-height: 1.8; margin: 8px 0 14px; }
+.support-section-title { color: #29364b; font-size: 15px; margin: 20px 0 10px; }
 .support-table-wrap { border: 1px solid #e1e5eb; border-radius: 6px; overflow-x: auto; }
 .support-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
 .support-table th { text-align: left; font-weight: 600; color: #526174; background: #f5f6f8; padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
 .support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid #edf0f4; color: #30343b; line-height: 1.6; }
 .support-table td.mono { white-space: nowrap; }
-.support-table td.support-mdf-cell { white-space: pre-line; }
+.support-table td.support-version-cell { white-space: pre-line; }
 .support-table tr:last-child td { border-bottom: 0; }
 .support-table tr.is-current td { background: #edf2fc; }
 .support-table td:first-child b { display: block; font-weight: 600; }
