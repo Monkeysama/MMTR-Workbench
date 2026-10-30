@@ -126,7 +126,7 @@ def _add_cbuffer_member_bytes(data: bytes, cbuffer_name: str, member_name: str,
         struct.pack_into('<I', prefix, descriptor + 16, new_size)
         struct.pack_into('<I', prefix, descriptor + 20, entry['member_count'] + 1)
         struct.pack_into('<Q', prefix, descriptor + 24, member_offset)
-    struct.pack_into('<Q', prefix, info['record_start'] - 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['shader_start_field'], new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -209,7 +209,7 @@ def _add_table_resource_bytes(data: bytes, kind: str, record_index: int, resourc
         if old_pointer == table_offset:
             new_record_offset = candidate['offset'] + head_delta if candidate['offset'] >= insert_pos else candidate['offset']
             struct.pack_into('<B', prefix, new_record_offset + count_field, len(table_offsets) + 1)
-    struct.pack_into('<Q', prefix, info['record_start'] - 8, new_shader_start)
+    struct.pack_into('<Q', prefix, info['shader_start_field'], new_shader_start)
     return bytes(prefix) + data[old_start:]
 
 
@@ -267,6 +267,9 @@ class Document:
                 raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组，RE2 四组，RE3 四组；per-target 四组：RE9/PRAGMATA/DD2/ONIMUSHA）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
+        # 兼容直接调用旧接口的路径；Document 内部所有材质读取都显式传 header_bytes。
+        from .material_addresses import set_material_header
+        set_material_header(self.info['material_header_bytes'])
         self.replacements: dict[int, bytes] = {}
         self.renames: dict[int, str] = {}
         self.redirects: dict[tuple[int, int], int] = {}
@@ -509,7 +512,8 @@ class Document:
             try:
                 for shader in current['shaders']:
                     try:
-                        reads = material_reads(decoder.disassemble(self.shader_bytes(shader['index'])))
+                        reads = material_reads(decoder.disassemble(self.shader_bytes(shader['index'])),
+                                          header_bytes=self.info['material_header_bytes'])
                     except ValueError as exc:
                         issues.append({'kind': 'material_layout', 'shader_index': shader['index'],
                                        'problem': f'材质地址形状尚未验证：{exc}'})
@@ -520,6 +524,9 @@ class Document:
                         break
             finally:
                 decoder.close()
+        # 自动扩展会新增成员；旧 DXC 反射文本可能省略未读取的原成员，但新增成员必须出现。
+        added_members = {item['name'] for edit in extensions
+                         for item in (edit.get('parameters') or ([edit['parameter']] if edit.get('parameter') else []))}
         # UserMaterial 是 MDF 供值的核心接口，名称和偏移必须与每个使用它的 DXIL 完全一致。
         for cbuffer_name in changed_cbuffers:
             metadata_entry = next((entry for entry in current['metadata']['cbuffers']
@@ -535,7 +542,11 @@ class Document:
                     continue
                 actual = {variable['name'].removeprefix('VAR_'): variable['offset']
                           for variable in reflected['variables']}
-                if actual != expected or reflected['size'] != expected_size:
+                # 只允许 UserMaterial 缺失未读取的原成员；新增成员必须已出现在反射中。
+                partial = (cbuffer_name == 'UserMaterial' and actual != expected
+                           and all(expected.get(name) == offset for name, offset in actual.items())
+                           and not added_members - set(actual))
+                if (actual != expected and not partial) or reflected['size'] != expected_size:
                     issues.append({
                         'kind': 'cbuffer', 'shader_index': shader['index'],
                         'name': cbuffer_name, 'expected': expected,

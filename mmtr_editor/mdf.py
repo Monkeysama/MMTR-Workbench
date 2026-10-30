@@ -1,8 +1,8 @@
-"""Byte-preserving MDF 2.10–2.45 reader and MDF/MMTR binding diagnostics.
+"""Byte-preserving MDF 2.10–2.51 reader and MDF/MMTR binding diagnostics.
 
 The Blender add-on supplied the format reference, but this module deliberately
 keeps the editor independent from Blender and does not implement a full
-rewriting exporter.  It reads the registered MDF 2.10-2.45 layouts without
+rewriting exporter.  It reads the registered MDF 2.10-2.51 layouts without
 normalizing unknown bytes so reports can be tied to the exact source file.
 """
 from __future__ import annotations
@@ -30,11 +30,13 @@ MDF_VERSIONS = {
     31: ('SF6', 'product/mastermaterial/'),
     32: ('RE4', '_Chainsaw/MasterMaterial/'),
     45: ('MHWilds', 'MaterialShader/'),
+    51: ('OnimushaWotS', 'MaterialShader/'),
 }
 
 # 材质头、属性头和纹理头的版本差异。字段偏移按 REasy mdf_file.py 的 MatHeader/ParamHeader/TexHeader
 # 读取顺序独立核对；v31–45 为 100 字节材质项，v19–30 为 80 字节，v13–18 为 64 字节，
-# v7–12 仍为 64 字节但属性头顺序不同。v6 的额外未知字段与 v51 扩展目前未登记。
+# v7–12 仍为 64 字节但属性头顺序不同。v51（鬼武者）材质项为 104 字节：属性数之后多一个
+# `float_count`（属性数据末端 float 数，不含末尾对齐），其后各字段后移 4 字节；属性头仍为 v31。
 _LAYOUT_V31 = {
     'material_size': 100, 'property_size': 24, 'texture_size': 32,
     'name': 0, 'name_hash': 8, 'params_size': 12, 'prop_count': 16, 'tex_count': 20,
@@ -63,8 +65,16 @@ _LAYOUT_V7 = {
     **_LAYOUT_V13, 'texture_size': 24, 'prop_rel': 20, 'prop_count_in_header': 16,
     'prop_flags': None, 'prop_count_size': 4, 'prop_layout': 'v6',
 }
+_LAYOUT_V51 = {
+    **_LAYOUT_V31, 'material_size': 104, 'float_count': 20, 'shader_redirects': None,
+    **{key: value + 4 for key, value in _LAYOUT_V31.items()
+       if key not in ('material_size', 'prop_rel', 'prop_count_in_header', 'prop_flags', 'prop_count_size',
+                      'prop_layout', 'property_size', 'texture_size', 'shader_redirects')
+       and isinstance(value, int) and value > 16},
+}
 MDF_LAYOUTS = {10: _LAYOUT_V7, 13: _LAYOUT_V13, 19: _LAYOUT_V19, 21: _LAYOUT_V19,
-               23: _LAYOUT_V19, 31: _LAYOUT_V31, 32: _LAYOUT_V31, 45: _LAYOUT_V31}
+               23: _LAYOUT_V19, 31: _LAYOUT_V31, 32: _LAYOUT_V31, 45: _LAYOUT_V31,
+               51: _LAYOUT_V51}
 
 
 def master_root_ok(path: str, version: int | None = None) -> bool:
@@ -151,7 +161,7 @@ def _public_data(value: Any) -> Any:
 
 
 class MdfDocument:
-    """Parsed MDF 2.10–2.45 document.
+    """Parsed MDF 2.10–2.51 document.
 
     原始字节用于固定宽度编辑；发生参数或纹理槽增删时，只重建被修改
     材质的尾部表和数据块，并把新块追加到文件末尾。这样可以保留其它
@@ -270,7 +280,10 @@ class MdfDocument:
             "gpbf": gpbf, "mmtrs": mmtrs, "flags": flags,
             "flags_hex": [_hex_flags(value) for value in flags],
             "property_count": property_count, "texture_count": texture_count,
-            "property_block_size": property_block_size, "properties": properties, "textures": textures,
+            "property_block_size": property_block_size,
+            **({"property_float_count": _u32(data, base + layout['float_count'])}
+               if layout.get('float_count') is not None else {}),
+            "properties": properties, "textures": textures,
         }
 
     @property
@@ -687,6 +700,10 @@ class MdfDocument:
             material['property_block_size'] = block_size
             material['property_count'] = len(material['properties'])
             material['texture_count'] = len(material['textures'])
+            if self.layout.get('float_count') is not None:
+                # 鬼武者的 float_count 记录属性数据实际末端，不含 block_size 的末尾对齐。
+                material['property_float_count'] = end // 4
+                struct.pack_into('<I', result, base + self.layout['float_count'], end // 4)
         return result
 
     def build(self) -> tuple[bytes, dict[str, Any]]:

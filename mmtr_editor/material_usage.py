@@ -77,13 +77,13 @@ def _material_handle_gaps(definitions, uses, origins, recognized_loads, cbuffer_
 
 # 单个 Shader 的读取：record 为材质记录字节偏移（参数区与尾部字段），cbuffer 为静态 UserMaterial 偏移；
 # record_handles 为其值流入 createHandleFromHeap 的记录偏移。
-def _function_input_reads(ir, cbuffer_name):
+def _function_input_reads(ir, cbuffer_name, header_bytes=0):
     definitions, uses, _ = parse(ir)
     result = {'record': set(), 'record_handles': set(), 'instance': set(), 'cbuffer': set(), 'textures': set(),
               'errors': []}
     recognized_loads = set()
     try:
-        for read in material_reads(ir):
+        for read in material_reads(ir, header_bytes=header_bytes):
             recognized_loads.add(read['ssa'])
             for extract in read['extracts']:
                 # 无消费者的 extractvalue 不代表实际取值。
@@ -137,7 +137,7 @@ def _function_input_reads(ir, cbuffer_name):
 
 
 # SSA 名称只在函数内有意义；反射绑定为模块共享，函数正文逐个独立分析后合并。
-def shader_input_reads(ir, cbuffer_name='UserMaterial'):
+def shader_input_reads(ir, cbuffer_name='UserMaterial', header_bytes=0):
     bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
     functions = re.findall(r'^define .*?^}', ir, flags=re.M | re.S)
     result = {'record': set(), 'record_handles': set(), 'instance': set(), 'cbuffer': set(), 'textures': set(),
@@ -145,7 +145,7 @@ def shader_input_reads(ir, cbuffer_name='UserMaterial'):
     if not functions:
         result['errors'].append(('all', '没有可独立分析的 DXIL 函数。'))
     for body in functions:
-        reads = _function_input_reads(bindings+'\n'+body, cbuffer_name)
+        reads = _function_input_reads(bindings+'\n'+body, cbuffer_name, header_bytes)
         for key, values in reads.items():
             if key == 'errors':
                 result[key].extend(values)
@@ -168,7 +168,7 @@ def material_input_usage(document, material, layout, disassemble):
         key = hashlib.sha256(payload).digest()
         if key not in seen:
             try:
-                seen[key] = shader_input_reads(disassemble(payload))
+                seen[key] = shader_input_reads(disassemble(payload), header_bytes=layout.header_bytes)
             except Exception as exc:  # 反汇编失败的 Shader 使两类结果都不完整。
                 seen[key] = {'errors': [('all', str(exc))]}
         reads = seen[key]

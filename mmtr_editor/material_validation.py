@@ -68,7 +68,7 @@ def validate_material_layout(document, material, compiler):
                 for function in re.findall(r'^define .*?^}', ir, re.M | re.S):
                     source = module+'\n'+function
                     native += len(native_texture_reads(source, identity.old,
-                        material_reads(source, include_static=True), reflected))
+                        material_reads(source, include_static=True, header_bytes=identity.old.header_bytes), reflected))
                 cache[key] = (proof['material_markers'], native, None)
             except (ValueError, KeyError) as exc:
                 cache[key] = (0, 0, str(exc))

@@ -12,13 +12,13 @@ from .model import Document, EditError, interface_chunks
 from .removal_writer import patch_removal_declarations
 
 
-def _reads(ir):
+def _reads(ir, header_bytes=0):
     """函数名与SSA联合标识取值；编译后逐字段核对而不依赖全模块同名局部变量。"""
     bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))+'\n'
     result = {}
     for function in re.findall(r'^define .*?^}', ir, re.M | re.S):
         name = re.search(r'@([^ (]+)\(', function)[1]
-        for read in material_reads(bindings+function, include_static=True):
+        for read in material_reads(bindings+function, include_static=True, header_bytes=header_bytes):
             for ex in read['extracts']:
                 result[name, ex['ssa']] = (ex['offset'], read['kind'], read['stride'])
     return result
@@ -31,7 +31,7 @@ def _guards(ir, layout, components):
     for function in re.findall(r'^define .*?^}', ir, re.M | re.S):
         name = re.search(r'@([^ (]+)\(', function)[1]
         source = bindings+function
-        _, guards = material_marker_reads(source, layout, components, material_reads(source, include_static=True))
+        _, guards = material_marker_reads(source, layout, components, material_reads(source, include_static=True, header_bytes=layout.header_bytes))
         result.extend((name, g['extract'], g['comparison']) for g in guards)
     return result
 
@@ -66,7 +66,7 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                 prove_shader_removal(ir, layout)
                 before = reflection(ir)
                 edited, migration = remap_shader_reads(ir, layout)
-                expected_reads = _reads(edited)
+                expected_reads = _reads(edited, layout.new.header_bytes)
                 expected_guards = _guards(edited, layout.new, layout.new_components)
                 edited = patch_removal_declarations(edited, layout, before)
                 reflected_ir = compiler.disassemble(reflection_container(original))
@@ -80,11 +80,11 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                 after = reflection(actual)
                 if bodies(edited) != bodies(actual) or interface_chunks(original) != interface_chunks(payload):
                     raise EditError('删除后 Shader 原计算或签名发生意外变化。')
-                if _reads(actual) != expected_reads:
+                if _reads(actual, layout.new.header_bytes) != expected_reads:
                     raise EditError('删除后保留字段读取地址/实例步长与计划不一致。')
                 if _guards(actual, layout.new, layout.new_components) != expected_guards:
                     raise EditError('删除后材质布局标记未按新 MDF 计数完整保留。')
-                for _, (_, kind, stride) in _reads(actual).items():
+                for _, (_, kind, stride) in _reads(actual, layout.new.header_bytes).items():
                     if kind == 'instance' and stride and stride['bytes'] != layout.new.parameter_bytes:
                         raise EditError('删除后实例步长不一致。')
                 expected_bindings = [row for row in before['resource_binding_rows']

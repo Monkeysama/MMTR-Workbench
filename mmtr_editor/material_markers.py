@@ -17,6 +17,9 @@ def marker_value(layout, components):
 
 
 def marker_offset(layout):
+    """荒野与 RE4 的标记在尾部之后的下一行；鬼武者的标记在参数区之前的第 0 行（偏移为负）。"""
+    if layout.header_bytes:
+        return -layout.header_bytes
     return (layout.parameter_bytes + 4*len(layout.texture_names+layout.gpbf_names) + 15) & ~15
 
 
@@ -26,7 +29,7 @@ def material_marker_reads(ir, layout, components, reads, *, graph=None):
     ordinary, guards = [], []
     end = layout.parameter_bytes + 4*len(layout.texture_names+layout.gpbf_names)
     for read in reads:
-        outside = [ex for ex in read['extracts'] if ex['offset'] >= end]
+        outside = [ex for ex in read['extracts'] if ex['offset'] >= end or ex['offset'] < 0]
         if not outside or read['kind'] not in ('raw', 'cb'):
             ordinary.append(read)
             continue

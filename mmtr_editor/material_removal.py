@@ -108,7 +108,8 @@ def plan_removal_layout(old, properties, actions):
     if not removed['parameter']:
         moves = [ParameterMove(p['name'], p['offset'], p['offset'], p['byte_size']) for p in ordered]
     size = (cursor+15)&~15 if removed['parameter'] else old.parameter_bytes
-    new = MaterialTailLayout(size, tuple(t for t in old.texture_names if t not in removed['texture']), old.gpbf_names)
+    new = MaterialTailLayout(size, tuple(t for t in old.texture_names if t not in removed['texture']), old.gpbf_names,
+                             old.header_bytes)
     # MDF 标量数独立于参数块大小；删去填充行内的属性也必须改变布局标记。
     old_components = sum(p.get('count', p['byte_size']//4) for p in ordered)
     new_components = sum(p.byte_size//4 for p in moves)
@@ -116,9 +117,9 @@ def plan_removal_layout(old, properties, actions):
                          old_components, new_components)
 
 
-def shader_removal_reads(ir):
+def shader_removal_reads(ir, header_bytes=0):
     """加强已有读取器供删除使用；未知外部调用或无法迁移的访问均保留为阻塞。"""
-    reads = shader_input_reads(ir)
+    reads = shader_input_reads(ir, header_bytes=header_bytes)
     errors = list(reads['errors'])
     functions = re.findall(r'^define .*?^}', ir, flags=re.M | re.S)
     bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
@@ -129,7 +130,7 @@ def shader_removal_reads(ir):
                 errors.append(('all', '存在未证明的函数调用；本档不支持跨函数参数传递。'))
         try:
             # 删除还需迁移静态UserMaterial地址；较窄类型等未支持形式不能仅凭usage通过。
-            material_reads(bindings+'\n'+name_numeric_locals(function), include_static=True)
+            material_reads(bindings+'\n'+name_numeric_locals(function), include_static=True, header_bytes=header_bytes)
         except (ValueError, KeyError) as exc:
             errors.append(('all', f'删除寻址未覆盖：{exc}'))
     return {**reads, 'errors': list(dict.fromkeys(errors))}
@@ -137,7 +138,7 @@ def shader_removal_reads(ir):
 
 def prove_shader_removal(ir, layout):
     """只有全部读取可归属到保留字段才返回本Shader证明；不把unused统计当作删除许可。"""
-    reads = shader_removal_reads(ir)
+    reads = shader_removal_reads(ir, layout.old.header_bytes)
     if reads['errors']:
         raise EditError('删除覆盖不足：'+reads['errors'][0][1])
     bindings = '\n'.join(line for line in ir.splitlines() if line.startswith('; '))
@@ -146,7 +147,7 @@ def prove_shader_removal(ir, layout):
         source = bindings+'\n'+function
         _, uses, _ = parse(source)
         ordinary, guards = material_marker_reads(source, layout.old, layout.old_components,
-                                                 material_reads(source, include_static=True))
+                                                 material_reads(source, include_static=True, header_bytes=layout.old.header_bytes))
         markers += len(guards)
         for read in ordinary:
             if read['stride'] is not None and read['stride']['bytes'] != layout.old.parameter_bytes:
@@ -175,7 +176,7 @@ def remap_shader_reads(ir, layout):
         source = bindings+name_numeric_locals(match[0])+'\n'
         edited, ordinary, guards = relocate_material_markers(source, layout.old, layout.new,
             layout.old_components, layout.new_components-layout.old_components,
-            material_reads(source, include_static=True))
+            material_reads(source, include_static=True, header_bytes=layout.old.header_bytes))
         edited, report = relocate_material_reads(edited, layout.old, layout.new, reads=ordinary, relocation=layout)
         report['material_markers'] = len(guards)
         reports.append(report)

@@ -243,7 +243,7 @@ def append_metadata(data, source, operation):
                 prefix[base+0xe8] += len(textures)
                 struct.pack_into('<I', prefix, base+0xd4, total+len(textures))
     delta = len(prefix)-info['shader_start']
-    struct.pack_into('<Q', prefix, info['record_start'] - 8, len(prefix))
+    struct.pack_into('<Q', prefix, info['shader_start_field'], len(prefix))
     for record in info['records']:
         for reference in record['shader_references']:
             struct.pack_into('<Q', prefix, record['offset']+reference['field'], reference['offset']+delta)
@@ -283,7 +283,7 @@ def current_layout(document, material, info=None):
                 raise EditError('关联MDF参数偏移/宽度与UserMaterial不一致。')
     if len(set(textures+gpbf)) != len(textures+gpbf):
         raise EditError('材质尾部资源名称重复，无法证明字段身份。')
-    return MaterialTailLayout(size, textures, gpbf)
+    return MaterialTailLayout(size, textures, gpbf, info.get('material_header_bytes', 0))
 
 
 # 选择所有使用当前材质纹理的共享表，闭合PS引用；不创建未知阶段或空表。
@@ -436,7 +436,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
             reflections[index] = hashlib.sha256(original).digest(), before
             has_cb = bool(parameters) and any(cb['name'] == 'UserMaterial' for cb in before['cbuffers'])
             graph = ensure_graph(ir)
-            reads = material_reads(ir, graph=graph)
+            reads = material_reads(ir, graph=graph, header_bytes=old.header_bytes)
             proofs = native_texture_reads(ir, old, reads, before, graph=graph) if has_texture else []
             if proofs:
                 native_proofs[index] = proofs
@@ -479,7 +479,7 @@ def extend_material_interface(document, material, dll, *, parameter=None, textur
                 raise EditError(f'Shader #{index} 的原计算/签名出现意外变化。')
             previous_reads = {ex['ssa']: ex['offset'] for r in ordinary_reads if r['kind'] != 'instance' for ex in r['extracts']}
             actual_graph = ensure_graph(actual)
-            compiled_reads = material_reads(actual, graph=actual_graph)
+            compiled_reads = material_reads(actual, graph=actual_graph, header_bytes=new.header_bytes)
             if proofs and native_texture_reads(actual, new, compiled_reads, after, graph=actual_graph) != proofs:
                 raise EditError(f'Shader #{index} 的原生动态纹理槽身份发生变化。')
             compiled_ordinary, compiled_guards = material_marker_reads(

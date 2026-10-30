@@ -35,6 +35,9 @@ FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True, "uniform"), 221007879: ("
            251112814: ("ONIMUSHAWOTSDEMO", 0x110, (4,), True, "per-target"),
            260511270: ("DD2", 0x110, (4,), True, "per-target"),
            260605155: ("ONIMUSHAWOTS", 0x110, (4,), True, "per-target")}
+# 材质数据（BindlessBuffer 与 heap CBV）中 UserMaterial 之前的字节数。鬼武者第 0 行 lane 0 为模板 ID 标记，
+# 参数从第 1 行开始；荒野、RE4 及其余已登记游戏从第 0 行开始。参数实例流与具名 UserMaterial 不含该行。
+MATERIAL_HEADER_BYTES = {"ONIMUSHAWOTS": 16, "ONIMUSHAWOTSDEMO": 16}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -304,7 +307,9 @@ def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys,
         "header_u16_04": header04, "header_u16_06": header06, "program_counts": program_counts,
         "header_layout": header_layout, "candidate_groups": groups,
         "game": game, "resource_version": version, "runtime_cache_keys": runtime_cache_keys,
-        "shader_start": shader_start, "record_start": record_start, "record_size": record_size,
+        "shader_start": shader_start, "record_start": record_start, "header_size": record_start,
+        "shader_start_field": record_start - 8, "record_size": record_size,
+        "material_header_bytes": MATERIAL_HEADER_BYTES.get(game, 0),
         "record_end": offset, "record_count": len(records), "shader_count": len(shaders),
         "stages": dict(collections.Counter(s["stage"] for s in shaders)),
         "shader_models": dict(collections.Counter(s["shader_model"] for s in shaders)),
