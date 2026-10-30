@@ -5,10 +5,9 @@ import unittest
 
 from mmtr_editor.mdf import MdfDocument, MdfError
 from mmtr_editor.rpc import Service
-from tests.local_corpus import ORIGINAL_TOP_MDF as MDF, verify_original_top_mdf
+from tests.local_corpus import DETAILCOL_CORPUS, ORIGINAL_TOP_MDF as MDF, verify_original_top_mdf
 
-ROOT = Path(__file__).resolve().parents[1]
-MMTR = ROOT / "output/pix/detailcol_reference/archives"
+MMTR = DETAILCOL_CORPUS / "archives"
 
 
 @unittest.skipUnless(MDF.is_file() and MMTR.is_dir(), "local MHWILDS MDF/MMTR corpus unavailable")

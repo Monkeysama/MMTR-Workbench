@@ -10,10 +10,9 @@ import struct
 from mmtr_editor.mdf import MdfDocument, MdfError
 from mmtr_editor.migration import build_migration_report
 from mmtr_editor.rpc import Service
-from tests.local_corpus import ORIGINAL_TOP_MDF as MDF, verify_original_top_mdf
+from tests.local_corpus import DETAILCOL_CORPUS, ORIGINAL_TOP_MDF as MDF, verify_original_top_mdf
 
-ROOT = Path(__file__).resolve().parents[1]
-CORPUS = ROOT / 'output/pix/detailcol_reference'
+CORPUS = DETAILCOL_CORPUS
 
 
 def member(name, offset=0, size=4):
