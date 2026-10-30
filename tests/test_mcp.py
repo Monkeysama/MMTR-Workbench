@@ -1,6 +1,7 @@
 """MCP工具契约和事务回归；合成MDF即可运行，不需要DXC或游戏语料。"""
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -39,10 +40,19 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         return result.structured_content
 
     async def test_tool_schemas_and_annotations(self):
+        from mmtr_editor import __version__
         from mmtr_editor.hashes import XXH64_BACKEND
+        version = json.loads((Path(__file__).resolve().parents[1] / 'package.json').read_text(encoding='utf-8'))['version']
+        self.assertEqual((await self.call('status'))['version'], version)
+        self.assertEqual(__version__, version)
         self.assertEqual((await self.call('status'))['xxh64_backend'], XXH64_BACKEND)
         tools = {t.name: t for t in await self.server.list_tools()}
         self.assertEqual(len(tools), 34)
+        documentation = (Path(__file__).resolve().parents[1] / 'docs/workbench-mcp.md').read_text(encoding='utf-8')
+        documented_tools = [line.split('`')[1] for line in documentation.splitlines()
+                            if line.startswith('|`workbench_')]
+        self.assertEqual(len(documented_tools), len(tools))
+        self.assertEqual(set(documented_tools), set(tools))
         self.assertTrue(tools['workbench_list'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_usage'].annotations.read_only_hint)
         self.assertTrue(tools['workbench_removal_preview'].annotations.read_only_hint)
@@ -98,6 +108,66 @@ class McpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.state.service.doc.build()[0], self.state.service.mdf.build()[0], self.state.revision), before)
         with self.assertRaises(ToolError):
             await self.call('validate', scope='everything')
+
+    async def test_registered_mmtr_layouts_open_inspect_and_export_without_dxc(self):
+        # 协议入口必须沿用核心的组数、运行时键及 per-target 布局，不能只接受荒野旧版本。
+        cases = [
+            (240906211, dict(group_count=4)),
+            (250206176, dict(group_count=5)),
+            (221007879, dict(group_count=3, record_size=0x108)),
+            (1808160001, dict(group_count=4, record_size=0x108, runtime_cache_keys=False)),
+            (220427553, dict(group_count=3, record_size=0x108, runtime_cache_keys=False)),
+            (260605155, dict(group_count=4, header_layout='per-target', program_counts=(2, 1, 1, 1))),
+        ]
+        for version, options in cases:
+            with self.subTest(version=version):
+                original = mmtr_fixture(**options)
+                source = self.root / f'source.mmtr.{version}'
+                source.write_bytes(original)
+                status = await self.call('open', mmtr_path=str(source))
+                expected_records = sum(options.get('program_counts', [1] * options['group_count']))
+                self.assertEqual(status['mmtr']['pass_count'], expected_records)
+                structure = await self.call('inspect', kind='structure')
+                self.assertEqual(structure['header']['resource_version'], version)
+                self.assertEqual(structure['header']['group_count'], options['group_count'])
+                target = self.root / f'candidate.mmtr.{version}'
+                await self.call('export', mmtr_path=str(target))
+                self.assertEqual(target.read_bytes(), original)
+                self.assertEqual(source.read_bytes(), original)
+
+    async def test_multi_game_mdf_edits_rollback_and_keep_export_version(self):
+        from mmtr_editor.mdf import MdfDocument
+        from test_old_mdf_support import fixture as old_fixture
+        from test_onimusha_support import mdf51_fixture
+        from test_mdf51_layouts import standard_fixture
+        cases = [(13, old_fixture(13)), (23, old_fixture(23)), (32, fixture()),
+                 (51, mdf51_fixture()), (51, standard_fixture())]
+        for case, (version, original) in enumerate(cases):
+            with self.subTest(case=case, version=version):
+                source = self.root / f'source-{case}.mdf2.{version}'
+                source.write_bytes(original)
+                await self.call('open', mdf_path=str(source), material_index=0)
+                before = (await self.call('list', kind='properties'))['items']
+                with self.assertRaises(ToolError):
+                    await self.call('edit_mdf', actions=[
+                        dict(action='set_property', material_index=0, name=before[0]['name'],
+                             values=[0.75] * len(before[0]['values'])),
+                        dict(action='delete_property', material_index=0, name='__missing__')])
+                self.assertEqual((await self.call('list', kind='properties'))['items'], before)
+                self.assertFalse((await self.call('status'))['mdf']['unsaved'])
+                await self.call('edit_mdf', actions=[dict(action='add_texture', material_index=0,
+                    name='ReleaseMap', path='systems/rendering/NullBlack.tex')])
+                wrong = self.root / f'wrong-{case}.mdf2.45'
+                with self.assertRaises(ToolError):
+                    await self.call('export', mdf_path=str(wrong))
+                self.assertFalse(wrong.exists())
+                target = self.root / f'candidate-{case}.mdf2.{version}'
+                await self.call('export', mdf_path=str(target))
+                reopened = MdfDocument.open(target)
+                self.assertEqual(reopened.version, version)
+                self.assertIn('ReleaseMap', [row['name'] for row in reopened.material(0)['textures']])
+                self.assertEqual(reopened.material(1), MdfDocument(original, source).material(1))
+                self.assertEqual(source.read_bytes(), original)
 
     async def test_project_tools_keep_source_and_revision_and_restore_only_intent(self):
         from mmtr_editor.model import Document

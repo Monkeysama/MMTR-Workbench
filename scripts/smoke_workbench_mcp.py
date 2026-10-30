@@ -14,10 +14,16 @@ site.addsitedir(str(ROOT / '.build' / 'editor-deps'))
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mmtr_editor import __version__
+from mmtr_editor.mcp_server import WorkbenchSession, create_server
 
 
 # 每个调用经过实际子进程和协议schema；不通过直接调用Service冒充MCP链路。
 async def verify(args):
+    state = WorkbenchSession()
+    try:
+        expected_tools = {tool.name for tool in await create_server(state).list_tools()}
+    finally:
+        state.close()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     source_paths = [Path(args.mmtr).resolve(), Path(args.mdf).resolve()]
@@ -32,7 +38,9 @@ async def verify(args):
                 initialized = await session.initialize()
                 assert initialized.server_info.version == __version__, initialized
                 tools = await session.list_tools()
-                assert len(tools.tools) == 20, len(tools.tools)
+                actual_tools = {tool.name for tool in tools.tools}
+                assert len(actual_tools) == len(tools.tools), 'MCP 工具名称重复'
+                assert actual_tools == expected_tools, (actual_tools, expected_tools)
                 assert all(tool.output_schema for tool in tools.tools)
 
                 async def call(tool_name, error=False, **kwargs):
@@ -92,7 +100,8 @@ async def verify(args):
                 partial = output/'must-not-exist.mmtr'
                 await call('export', mmtr_path=str(partial), mdf_path=str(source_paths[1]), error=True)
                 assert not partial.exists()
-                mmtr_out, mdf_out = output/'candidate.mmtr.240906211', output/'candidate.mdf2.45'
+                # 保留输入资源的版本后缀，不能将其它游戏的候选伪装成荒野版本。
+                mmtr_out, mdf_out = (output / ('candidate' + ''.join(path.suffixes)) for path in source_paths)
                 result = await call('export', mmtr_path=str(mmtr_out), mdf_path=str(mdf_out),
                                     report_path=str(output/'export-report.json'))
                 hashes = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (mmtr_out, mdf_out)]

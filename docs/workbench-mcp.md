@@ -1,8 +1,10 @@
-# MMTR Workbench MCP 0.3.0
+# MMTR Workbench MCP
 
 Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询、编辑、编译、验证和导出 MMTR/MDF。便携包自带运行环境，不需要 Python；DXC 操作仍需用户提供 `dxcompiler.dll`。
 
 每个连接启动独立进程并拥有自己的内存文档，不读取桌面窗口的未保存内容。桌面与 MCP 复用相同编辑核心和材质布局迁移实现，文件通过另存交换。
+
+MCP 与软件使用同一版本号，可在连接初始化结果或 `workbench_status.version` 中查看。游戏和文件版本见[游戏支持表](game-support.md)，MCP 与桌面适用相同的格式范围。打开时保留完整的 `.mmtr.数字版本` 和 `.mdf2.数字版本` 文件名；无法确定游戏材质头时，仍可浏览结构，但会拒绝材质布局编辑，不能仅改后缀来转换格式。
 
 ## 连接
 
@@ -50,7 +52,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 |`workbench_redirect`|修改通道的既有阶段引用，默认检查接口/反射|
 |`workbench_rename`|在既有字符串容量内改名，保持共享名称 hash|
 |`workbench_add_parameter`|自动新增尾部 UserMaterial 参数和关联 MDF 参数|
-|`workbench_add_texture`|自动新增已有 PS 表中的 Texture2D 和关联 MDF 槽位|
+|`workbench_add_texture`|新增已证明的固定或原生动态 Texture2D 接口和关联 MDF 槽位|
 |`workbench_material_preview`|预览一次混合追加的最终布局、关联材质和计划摘要|
 |`workbench_material_submit`|使用计划摘要和请求键提交后台批次，返回 job_id|
 |`workbench_material_status`|查询任务状态、阶段、数量和错误，不重建文档|
@@ -114,7 +116,7 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 
 ### 只读结构预检
 
-源码新增的 structure 查询在重新构建核心并重连 MCP 后可用，旧便携包不会自动获得。无需 DXC，打开 MMTR 后调用 `workbench_inspect`：
+无需 DXC，打开 MMTR 后调用 `workbench_inspect`：
 
 ```json
 {"kind":"structure","limit":20}
@@ -152,8 +154,6 @@ Workbench 提供标准 stdio MCP 服务，智能体可以直接打开、查询�
 同会话只运行一个修改任务。重试必须使用原 request_key、动作和摘要，包括已经完成的任务；同键不同请求会拒绝。会话最多保留128个任务，不淘汰幂等键，重启后不恢复。读取返回已提交状态；期间发生编辑、材质切换或 DXC 改变，会拒绝过期候选，保留较新的编辑。
 
 取消只回收候选 worker，不改当前文档或写入文件。cancel 返回 cancelling 后继续查询，直到 cancelled；若提交先完成则返回 succeeded。Windows worker 归属于 kill-on-close Job Object，冻结入口另监视 onefile 启动器，外层被终止时也结束内层核心。旧单项 MCP 工具仍兼容同步调用。桌面“参数与资源”的批量图标、参数/SRV 新增入口共用该后台任务服务。
-
-P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取消不变、过期拒绝、混合成功、运行中及成功后请求重试、成功后取消仍返回成功；状态查询最大延时分别为0.282/0.344秒，不能作为其它机器的耗时保证。Windows onefile 外层强制结束的进程树回收另行通过。桌面构建中的自有 HLSL 混合批次通过并自动定位新增参数，源码桌面使用 Stocking 验证进度与取消。均未进行游戏验证或自动安装。
 
 ## 调用示例
 
@@ -198,7 +198,7 @@ P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取
 {"mmtr_path":"D:/Output/example.mmtr.240906211","mdf_path":"D:/Output/example.mdf2.45","report_path":"D:/Output/report.json"}
 ```
 
-将材质改用独立MMTR时，先完成参数/纹理新增，再显式调用 `workbench_set_master`，例如 `{"material_index":5,"path":"MaterialShader/Variation/test.mmtr"}`。路径必须位于MaterialShader目录下、以.mmtr结尾且不带版本后缀。它不复制MMTR、不自动改变其它同master材质，也不证明任意目标Shader兼容。引用修改后可导出新MMTR并重新打开其实际路径，确认关联材质。
+将材质改用独立 MMTR 时，先完成参数/纹理新增，再显式调用 `workbench_set_master`，例如荒野的 `{"material_index":5,"path":"MaterialShader/Variation/test.mmtr"}`。master 必须位于当前 MDF 版本的资源根目录下、以 `.mmtr` 结尾且不带版本后缀；RE4 使用 `_Chainsaw/MasterMaterial/`，不能套用荒野路径。它不复制 MMTR、不自动改变其它同 master 材质。引用修改后可导出新 MMTR 并重新打开其实际路径，确认关联材质。MDF 导出后缀必须与已打开版本一致，例如 RE4 的 `.mdf2.32`。
 
 输出目录需存在，目标不能覆盖已打开源文件。导出先构造/验证全部候选并预检所有路径，写入使用原子替换；后续写入失败会尝试恢复先前目标。普通 I/O 故障在回归中验证恢复，不承诺断电或外部进程并发写入时的跨文件原子性。响应包含绝对路径、大小和 SHA256，成功后更新会话的未导出状态。
 
@@ -231,11 +231,9 @@ P3 本机验收使用固定 Stocking 副本：源码和冻结 stdio 均通过取
 
 `workbench_effect_template(name="emission_multiplier")` 返回封闭的 P6 合同：新增 `MMTR_EmissionStrength` 和 `MMTR_EmissionMap`，输入是原像素输出与这两个接口，输出是最终像素输出。`workbench_effect_preview` 将同一动作送入批量最终布局计划；调用方必须提供显式读取并保留原受光/透明分支的 Shader，再通过批量接口编译验证。状态编辑、任意节点图和 GPU 预览仍未开放。
 
-2026-10-21 的 PR #3 整合验证：核心 330 项中 242 通过、88 项可选语料跳过，MCP 19 项通过，前端 17 项通过/1 项缺 fixture 跳过，TypeScript/Vite 构建通过。自有 HLSL 通过隔离 DXC 验证 shl 步长和常量地址在参数/纹理混合批次后的实际读取。固定 P0 Stocking 输入的真实源码 stdio 查询首次约 15.40 秒，后续分页约 0.04 秒；报告识别 164 个参数、21 个纹理、4 个 GPBF 有读取，11 个参数为 unknown，整体覆盖未完成，不能推断这些参数未使用。会话 revision、文档状态与输入文件字节均保持不变。证据仅限源码/CPU/DXC；未验收冻结包、GPU 或游戏效果。本地复现记录位于忽略的 `output/pr3-*`，不是线上附件。
+`workbench_edit_mdf` 删除字段只改变 MDF；同步删除 MMTR 参数或 Texture2D 接口应使用 `workbench_removal_preview/submit`。Sampler/UAV 不支持自动迁移。手动 rename、expert 替换和 `validate` 不能代替游戏画面验收。
 
-删除 MDF 字段不代表删除 MMTR Shader 接口；Sampler/UAV 和真正 MMTR 接口删除不提供自动迁移。手动 rename、expert 替换等仍受既有核心边界限制，不等于可运行布局已成立。`validate` 证明本次静态接口契约，不能替代 GPU 或游戏画面验收。
-
-开发验证：`npm run test:mcp` 运行无游戏资产的 SDK 工具契约、分页、批量回滚、源文件/硬链接保护、导出故障恢复测试。真实 stdio 客户端使用 `scripts/smoke_workbench_mcp.py --help` 查看输入参数；可分别连接源码和冻结 EXE，比较相同输入的候选 hash。离线实验输出仅保留本地，不复制到游戏目录。
+开发验证：`npm run test:mcp` 检查 SDK 工具契约、分页、批量回滚、源文件/硬链接保护和导出故障恢复。`python scripts/smoke_workbench_standalone.py --require-native-hash` 使用合成 MDF 经真实 stdio 验证，添加 `--executable 路径/mmtr-core.exe` 可检查冻结包，添加 `--dxc 路径/dxcompiler.dll` 可检查隔离编译。需要指定本地 MMTR/MDF 做完整编辑实验时，使用 `scripts/smoke_workbench_mcp.py --help` 查看参数；输出只写入指定目录，不复制到游戏目录。
 
 ## 性能与长调用
 

@@ -51,6 +51,7 @@ async def verify(executable, dxc=None, *, require_native_hash=False):
                     return result.structured_content
 
                 status = await call('status')
+                assert status['version'] == initialized.server_info.version == __version__
                 hash_backend = status.get('xxh64_backend')
                 if require_native_hash:
                     assert hash_backend == 'native', f'MCP未加载原生xxHash：{hash_backend}'
