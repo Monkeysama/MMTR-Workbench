@@ -252,12 +252,12 @@ class Document:
         try:
             _, self.info = inspect_data(self.original, self.source)
             groups = self.info['header_u16_04']
-            # 只放开各游戏已研究的组数（荒野四/五组，RE4/SF6/旧版 DD2 三组）；声明记录必须完整，不能接受兼容扫描的截断结果。
-            allowed = {g for game, _size, groups in FORMATS.values() if game == self.info['game'] for g in groups}
+            # 只放开各游戏已研究的组数；声明记录必须完整，不能接受兼容扫描的截断结果。
+            allowed = {g for game, _size, groups, _keys in FORMATS.values() if game == self.info['game'] for g in groups}
             if (groups not in allowed or len(self.info['candidate_groups']) != groups
                     or self.info['record_count'] != groups * self.info['header_u16_06']
                     or any(not g['name_sequence_matches_first'] for g in self.info['candidate_groups'])):
-                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组）。')
+                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
         self.replacements: dict[int, bytes] = {}
@@ -290,11 +290,15 @@ class Document:
     def check_original_integrity(self):
         bad_names = [r['offset'] for r in self.name_rows.values()
                      if murmur3_x86_32(r['name'].encode('ascii'), 0xffffffff) != r['name_hash_raw']]
-        bad_shaders = [s['index'] for s in self.info['shaders']
-                       if xxh64(self.original[s['offset']:s['trailer_offset']], 0xffffffff)
-                       != int.from_bytes(bytes.fromhex(s['trailer_hex']), 'little')]
+        if self.info.get('runtime_cache_keys', True):
+            bad_shaders = [s['index'] for s in self.info['shaders']
+                           if xxh64(self.original[s['offset']:s['trailer_offset']], 0xffffffff)
+                           != int.from_bytes(bytes.fromhex(s['trailer_hex']), 'little')]
+            checked = len(self.info['shaders'])
+        else:
+            bad_shaders, checked = [], 0
         return {'name_records_checked': len(self.name_rows), 'name_hash_mismatches': bad_names,
-                'shader_trailers_checked': len(self.info['shaders']),
+                'shader_trailers_checked': checked,
                 'shader_trailer_mismatches': bad_shaders}
 
     def _index(self, value):
@@ -894,20 +898,21 @@ class Document:
                 struct.pack_into('<I', prefix, row['offset'] + 8, value)
         offsets, pieces, cursor = {}, [], len(prefix)
         changed = []
+        runtime_keys = self.info.get('runtime_cache_keys', True)
         for s in self.info['shaders']:
             index = s['index']
             payload = self.shader_bytes(index)
             offsets[index] = cursor
             if index in self.replacements:
-                tail = struct.pack('<Q', xxh64(payload, 0xffffffff))
+                tail = struct.pack('<Q', xxh64(payload, 0xffffffff)) if runtime_keys else b''
                 changed.append({'index': index, 'old_size': s['size'], 'new_size': len(payload),
                                 'old_offset': s['offset'], 'new_offset': cursor,
                                 'sha256': hashlib.sha256(payload).hexdigest(),
                                 **self.replacement_notes.get(index, {})})
             else:
-                tail = self.original[s['trailer_offset']:s['trailer_offset'] + 8]
+                tail = self.original[s['trailer_offset']:s['trailer_offset'] + 8] if runtime_keys else b''
             pieces.extend((payload, tail))
-            cursor += len(payload) + 8
+            cursor += len(payload) + (8 if runtime_keys else 0)
         for r in working_info['records']:
             for ref in r['shader_references']:
                 target = self.effective_shader(r['index'], ref['field'])

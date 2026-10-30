@@ -15,7 +15,7 @@ PATH = Path('MaterialShader/Variation/synthetic.mmtr.240906211')
 
 # 各组共享同一 PS/绑定/状态，测试共享者闭包及非零未知字节的保留。
 # record_size 0x108 生成 RE4 记录：0xFF 之前的字段与荒野相同，没有荒野 0x100..0x107 的 8 字节。
-def fixture(group_count=4, programs_per_group=1, record_size=0x110):
+def fixture(group_count=4, programs_per_group=1, record_size=0x110, runtime_cache_keys=True):
     record_count = group_count * programs_per_group
     data = bytearray(16+record_count*record_size)
     data[:4] = b'SDF\0'
@@ -38,19 +38,23 @@ def fixture(group_count=4, programs_per_group=1, record_size=0x110):
     cb = append(bytes([0, 0, 0, 0, 0, 0, 16, 255]))
     srv = append(bytes([0, 0, 0, 0, 3, 0, 16, 2]))
     layout = append(struct.pack('<II4BI', 1, 0, 0, 2, 0, 0, 12))
-    append(b'layout!!')
+    if runtime_cache_keys:
+        append(b'layout!!')
     raster = append(struct.pack('<Iiff', 0x1C1, -2, 0.0, 1.0))
-    append(b'raster!!')
+    if runtime_cache_keys:
+        append(b'raster!!')
     blend = append(struct.pack('<9I', *([0]*8+[3])))
-    append(b'blend!!!')
+    if runtime_cache_keys:
+        append(b'blend!!!')
     depth = append(struct.pack('<Q', 0xFF010081))
-    append(b'depth!!!')
+    if runtime_cache_keys:
+        append(b'depth!!!')
     start = len(data)
     # 足够满足容器结构检查的合成 DXIL，禁止将其当可执行 bitcode 或游戏有效载荷。
     payload = struct.pack('<6I', 0x60, 7, 0x4C495844, 0x100, 16, 4)+b'BC\xc0\xde'
     blob = b'DXBC'+bytes(16)+struct.pack('<III', 1, 72, 1)+struct.pack('<I', 36)+b'DXIL'+struct.pack('<I', 28)+payload
     assert len(blob) == 72
-    data.extend(blob+struct.pack('<Q', xxh64(blob, 0xffffffff)))
+    data.extend(blob + (struct.pack('<Q', xxh64(blob, 0xffffffff)) if runtime_cache_keys else b''))
     struct.pack_into('<Q', data, 8, start)
     for i in range(record_count):
         base = 16+i*record_size

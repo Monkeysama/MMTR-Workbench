@@ -20,11 +20,14 @@ import uuid
 STAGES = {0: "ps", 1: "vs", 2: "gs", 3: "hs", 4: "ds", 5: "cs", 6: "lib", 13: "ms", 14: "as"}
 RECORD_START = 0x10
 RECORD_SIZE = 0x110
-# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107
-# 多出 8 字节（全部原版语料为零），其后的 compute 线程组与拓扑随之后移。
-FORMATS = {240906211: ("MHWilds", 0x110, (4, 5)), 221007879: ("RE4", 0x108, (3,)),
-           221102761: ("SF6", 0x108, (3,)), 250109895: ("SF6", 0x108, (3,)),
-           240112003: ("DD2", 0x108, (3,)), 240423143: ("DD2", 0x108, (3,))}
+# 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数, Shader/状态后是否带 8 字节运行时缓存键)。
+# 两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107 多出 8 字节（全部原版语料为零），
+# 其后的 compute 线程组与拓扑随之后移。RE8/MHRISE/RE2RT 不写运行时缓存键，Shader 记录首尾相接。
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True), 221007879: ("RE4", 0x108, (3,), True),
+           221102761: ("SF6", 0x108, (3,), True), 250109895: ("SF6", 0x108, (3,), True),
+           240112003: ("DD2", 0x108, (3,), True), 240423143: ("DD2", 0x108, (3,), True),
+           2102188797: ("RE8", 0x108, (5,), False), 220427553: ("MHRISE", 0x108, (3,), False),
+           2109101635: ("RE2RT", 0x108, (5,), False)}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -117,17 +120,18 @@ def inspect_data(data, path):
     """
     version = resource_version(path)
     if version in FORMATS:
-        game, record_size, _groups = FORMATS[version]
-        return _inspect_layout(data, path, game, record_size, version)
+        game, record_size, _groups, runtime_keys = FORMATS[version]
+        return _inspect_layout(data, path, game, record_size, version, runtime_keys)
     results, errors = [], []
     seen = set()
-    for game, record_size, _groups in FORMATS.values():
-        # 同一记录长度由多个资源版本共用；无后缀时不要把相同布局重复计为歧义。
-        if record_size in seen:
+    for game, record_size, _groups, runtime_keys in FORMATS.values():
+        # 无后缀时按“记录长度 + 缓存键布局”去重；两种布局不能共用同一次解析。
+        key = (record_size, runtime_keys)
+        if key in seen:
             continue
-        seen.add(record_size)
+        seen.add(key)
         try:
-            results.append(_inspect_layout(data, path, game, record_size, version))
+            results.append(_inspect_layout(data, path, game, record_size, version, runtime_keys))
         except ValueError as exc:
             errors.append(exc)
     if len(results) == 1:
@@ -137,7 +141,7 @@ def inspect_data(data, path):
     raise ValueError("SDF record size is ambiguous; add the resource version suffix to the file name")
 
 
-def _inspect_layout(data, path, game, record_size, version):
+def _inspect_layout(data, path, game, record_size, version, runtime_cache_keys):
     if data[:4] != b"SDF\0":
         raise ValueError("Not an SDF/MMTR file")
     shader_start = u64(data, 8)
@@ -149,12 +153,16 @@ def _inspect_layout(data, path, game, record_size, version):
         shader = decode_dxbc(data, offset)
         shader["index"] = len(shaders)
         trailer = offset + shader["size"]
-        if trailer + 8 > len(data):
-            raise ValueError("Missing eight-byte container trailer")
         shader["trailer_offset"] = trailer
-        shader["trailer_hex"] = data[trailer:trailer + 8].hex()
+        if runtime_cache_keys:
+            if trailer + 8 > len(data):
+                raise ValueError("Missing eight-byte container trailer")
+            shader["trailer_hex"] = data[trailer:trailer + 8].hex()
+            offset = trailer + 8
+        else:
+            shader["trailer_hex"] = ""
+            offset = trailer
         shaders.append(shader)
-        offset = trailer + 8
     by_offset = {s["offset"]: s for s in shaders}
     metadata = {kind: {} for kind in TABLE_FIELDS}
 
@@ -252,13 +260,13 @@ def _inspect_layout(data, path, game, record_size, version):
                            "name_sequence_matches_first": [r["name_offset"] for r in group] ==
                            [r["name_offset"] for r in records[:header06]]})
     rebuilt = data[:shader_start] + b"".join(
-        data[s["offset"]:s["trailer_offset"] + 8] for s in shaders)
+        data[s["offset"]:s["trailer_offset"] + (8 if runtime_cache_keys else 0)] for s in shaders)
     strings = [{"offset": m.start(), "text": m.group().decode("ascii")} for m in re.finditer(rb"[ -~]{5,}", data[:shader_start])]
     return data, {
         "source": str(path.resolve()), "size": len(data), "sha256": sha256(data),
         "magic": "SDF\\0", "header_u32_04": u32(data, 4),
         "header_u16_04": header04, "header_u16_06": header06, "candidate_groups": groups,
-        "game": game, "resource_version": version,
+        "game": game, "resource_version": version, "runtime_cache_keys": runtime_cache_keys,
         "shader_start": shader_start, "record_start": RECORD_START, "record_size": record_size,
         "record_end": offset, "record_count": len(records), "shader_count": len(shaders),
         "stages": dict(collections.Counter(s["stage"] for s in shaders)),

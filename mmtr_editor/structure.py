@@ -1,4 +1,4 @@
-"""SDF Program（荒野 0x110、RE4/SF6/旧版 DD2 0x108）的只读结构与绑定索引，无 UI/DXC 或写入能力。
+"""SDF Program（荒野 0x110、RE4/SF6/旧版 DD2 0x108、RE8/MHRISE/RE2RT 0x108 无缓存键）的只读结构与绑定索引，无 UI/DXC 或写入能力。
 
 字段参考 REasy 0eb38af 的公开格式定义，独立实现；保留原字节与未知值。
 旧 inspect_data 仍是兼容解析入口，新解释的问题只进入诊断，不改变其浏览行为。
@@ -213,7 +213,8 @@ class Structure:
                 'object_count': len(self.objects),
                 'metadata_count': len(self.metadata),
                 'unmodeled_range_count': len(self.unmodeled_ranges),
-                'state_cache_key_algorithm': 'opaque',
+                'state_cache_key_algorithm': ('opaque' if any(o.kind.endswith('_cache_key') for o in self.objects)
+                                              else 'absent'),
                 'shared_object_count': sum(len(o.users) > 1 for o in self.objects),
                 'diagnostic_counts': dict(counts),
                 'preflight': {'structure': 'failed' if counts['error'] else 'warning' if counts['warning'] else 'passed',
@@ -365,7 +366,7 @@ def parse_structure(data, path, info=None):
             key = span(kind, pointer, size, PointerUse(i, base+field, kind), values)
             if key:
                 object_refs.append(key)
-                if kind in ('input_layout', 'rasterizer', 'blend', 'depth_stencil'):
+                if kind in ('input_layout', 'rasterizer', 'blend', 'depth_stencil') and info.get('runtime_cache_keys', True):
                     trailer_key = span(f'{kind}_cache_key', pointer+size, 8,
                                        PointerUse(i, base+field, f'{kind}_cache_key'),
                                        (('algorithm', 'opaque'),))
