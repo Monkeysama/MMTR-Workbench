@@ -65,7 +65,7 @@ class PortablePackageConsoleTests(unittest.TestCase):
             (root / '工具使用说明.md').write_text(
                 '[MCP](docs/workbench-mcp.md)\n[游戏](docs/game-support.md)\n[开发](docs/development.md)',
                 encoding='utf-8')
-            (root / 'docs' / 'workbench-mcp.md').write_text('中文说明', encoding='utf-8')
+            (root / 'docs' / 'workbench-mcp.md').write_text('中文说明\n[游戏](game-support.md)', encoding='utf-8')
             (root / 'docs' / 'game-support.md').write_text('游戏支持表', encoding='utf-8')
             buffer = io.BytesIO()
             stream = io.TextIOWrapper(buffer, encoding='cp1252', errors='strict')
@@ -75,7 +75,8 @@ class PortablePackageConsoleTests(unittest.TestCase):
             report = json.loads(buffer.getvalue().decode('cp1252'))
             directory, archive = Path(report['directory']), Path(report['archive'])
             self.assertTrue(verify_package(directory, archive))
-            self.assertEqual((directory / 'MCP使用说明.md').read_text(encoding='utf-8'), '中文说明')
+            self.assertEqual((directory / 'MCP使用说明.md').read_text(encoding='utf-8'),
+                             '中文说明\n[游戏](游戏支持说明.md)')
             self.assertEqual((directory / '游戏支持说明.md').read_text(encoding='utf-8'), '游戏支持表')
             guide = (directory / '使用说明.md').read_text(encoding='utf-8')
             self.assertIn('](MCP使用说明.md)', guide)

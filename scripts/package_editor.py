@@ -36,7 +36,10 @@ def main():
     configuration = {'mcpServers': {'mmtr-workbench': {
         'command': args.mcp_command or str((dest / 'mmtr-core.exe').resolve()), 'args': ['--mcp']}}}
     (dest / 'mcp-config.json').write_text(json.dumps(configuration, ensure_ascii=False, indent=2), encoding='utf-8')
-    shutil.copy2(ROOT / 'docs' / 'workbench-mcp.md', dest / 'MCP使用说明.md')
+    # MCP 说明从 docs 移到包根目录后，游戏支持链接也需指向包内名称。
+    mcp_guide = (ROOT / 'docs' / 'workbench-mcp.md').read_text(encoding='utf-8')
+    (dest / 'MCP使用说明.md').write_text(mcp_guide.replace(
+        '](game-support.md)', '](游戏支持说明.md)'), encoding='utf-8')
     names = [name for _, name in mapping] + ['mcp-config.json', 'MCP使用说明.md']
     manifest = [{'file': name, 'size': (dest / name).stat().st_size,
                  'sha256': hashlib.sha256((dest / name).read_bytes()).hexdigest()}
