@@ -58,6 +58,12 @@ export interface DocumentInfo {
   source: string;
   size: number;
   sha256: string;
+  game: string;
+  resource_version: number;
+  record_size: number;
+  header_layout: "uniform" | "per-target";
+  runtime_cache_keys: boolean;
+  material_header_bytes: number;
   record_count: number;
   shader_count: number;
   stages: Record<string, number>;

@@ -39,6 +39,7 @@ import SourcePanel from "./SourcePanel.vue";
 import MdfPanel from "./MdfPanel.vue";
 import FileDialog from "./FileDialog.vue";
 import ToolSettings from "./ToolSettings.vue";
+import SupportMatrix from "./SupportMatrix.vue";
 import MaterialBatchDialog from "./material/MaterialBatchDialog.vue";
 import DocumentTabs from "./DocumentTabs.vue";
 const props = defineProps<{ documentId: string; tabs: DocumentTab[]; active: boolean; workspaceBusy: boolean }>();
@@ -70,10 +71,11 @@ const {
   integrityOk,
 } = wb;
 const settings = shallowRef(false);
+const support = shallowRef(false);
 // 父容器只读取生命周期摘要；编辑状态与异步回调始终属于当前固定文档。
 watch((): DocumentState => ({ source: doc.value?.source ?? null, mdfSource: mdfDoc.value?.source ?? null,
   dirty: wb.dirty.value, busy: busy.value || wb.mdfSaving.value,
-  modal: !!dialog.value || settings.value || wb.materialBatch.visible.value || wb.materialRemoval.visible.value,
+  modal: !!dialog.value || settings.value || support.value || wb.materialBatch.visible.value || wb.materialRemoval.visible.value,
 }), state => emit("state", state), { immediate: true, flush: "sync" });
 const nav: { id: Tab; label: string; icon: typeof Layers3 }[] = [
   { id: "overview", label: "文件概览", icon: LayoutDashboard },
@@ -135,7 +137,7 @@ function navigate(id: string) {
               }}</b>
             </div>
             <div class="sidebar-filemeta">
-              {{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
+              {{ doc.game }} · {{ doc.resource_version }}<br />{{ bytes(doc.size) }} · {{ doc.shader_count }} 个着色器
             </div>
             <ElTag :type="doc.dirty ? 'warning' : 'info'" effect="plain">{{
               doc.dirty
@@ -146,7 +148,9 @@ function navigate(id: string) {
           <p v-else class="sidebar-filemeta">打开 MMTR 文件以开始检查</p>
         </div>
         <div class="sidebar-footer">
-          <ElButton text class="settings-button" @click="settings = true"
+          <ElButton text class="settings-button" @click="support = true"
+            ><ShieldCheck :size="18" />支持范围</ElButton
+          ><ElButton text class="settings-button" @click="settings = true"
             ><Settings2 :size="18" />工具设置</ElButton
           ><span>本地工作空间</span>
         </div>
@@ -157,7 +161,7 @@ function navigate(id: string) {
             :tabs="props.tabs"
             :active-id="props.documentId"
             :active="props.active"
-            :disabled="props.workspaceBusy || !!dialog || settings || wb.materialBatch.visible.value || wb.materialRemoval.visible.value"
+            :disabled="props.workspaceBusy || !!dialog || settings || support || wb.materialBatch.visible.value || wb.materialRemoval.visible.value"
             @select="emit('select', $event)"
             @close="emit('close', $event)"
             @create="emit('create')"
@@ -302,15 +306,15 @@ function navigate(id: string) {
             <div class="welcome-header">
               <span class="welcome-symbol"><Layers3 :size="44" /></span>
               <h2>MMTR Workbench</h2>
-              <p>检查、编辑与重建《怪物猎人：荒野》的着色器包</p>
-              <p class="secondary-text">将 MMTR 或 MDF 文件拖入窗口即可打开</p>
-              <ElButton
-                type="primary"
-                size="large"
-                :disabled="busy"
-                @click="wb.openFile()"
-                ><FolderOpen :size="19" />打开 MMTR 文件</ElButton
-              >
+              <p>检查、编辑与重建 RE Engine 的 MMTR 着色器包与 MDF 材质</p>
+              <p class="secondary-text">已登记 16 个 MMTR 资源版本与 9 个 MDF 版本；各游戏证据等级不同。</p>
+              <div class="welcome-actions">
+                <ElButton type="primary" size="large" :disabled="busy" @click="wb.openFile()"
+                  ><FolderOpen :size="19" />打开 MMTR 文件</ElButton
+                ><ElButton size="large" @click="support = true"
+                  ><ShieldCheck :size="18" />查看支持范围</ElButton
+                >
+              </div>
             </div>
             <div class="welcome-grid">
               <div>
@@ -331,8 +335,7 @@ function navigate(id: string) {
             </div>
             <div class="welcome-note">
               <ShieldCheck :size="18" /><span
-                >编辑在内存中暂存，另存导出时写入独立文件。支持
-                .mmtr.250206176。</span
+                >编辑在内存中暂存，另存导出时写入独立文件。支持范围以登记版本为准，合成测试不等于游戏内验证。</span
               >
             </div>
           </section>
@@ -354,6 +357,13 @@ function navigate(id: string) {
           }}</span>
         </footer>
       </div>
+      <SupportMatrix
+        v-if="props.active"
+        v-model="support"
+        :doc="doc"
+        :mdf-version="mdfDoc?.version ?? null"
+        :mdf-game="mdfDoc?.game ?? null"
+      />
       <ToolSettings
         v-if="props.active && settings"
         :dll="dll"

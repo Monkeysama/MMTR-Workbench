@@ -8,4 +8,4 @@ DXC原生调用通过隔离工作进程执行。材质接口扩展迁移已识�
 
 MCP入口复用Service和模型，一个进程一个独立会话，RLock串行访问。新增参数、Texture2D及批次动作失败回滚整个候选。桌面已打开文件的内存不与MCP共享。MCP通过stdio传协议，不提供任意代码执行或游戏安装接口。
 
-当前自动迁移仅支持已知布局，删除Shader接口和新阶段表仍需显式处理与验证。MMTR 已识别 uniform 序列和 0x110 per-target 两种文件头；per-target 的五个版本按 REasy profile 登记并有合成测试，仍缺真实语料与 mesh/amplification 语义验证。MDF 已登记 2.10/2.13（RE2/RE3）、2.19/2.21/2.23（RE8/RE2RT/MHRISE）、2.31（SF6）、2.32（RE4）与 2.45（荒野）；MMTR 已支持样本不等于同引擎全部游戏版本兼容。已知跨材质编辑顺序问题见。
+当前自动迁移仅支持已知布局，删除 Shader 接口和新阶段表仍需显式处理与验证。MMTR 已识别 uniform 与 0x110 per-target 两种文件头；per-target 版本按 REasy profile 登记，鬼武者另有 16 字节材质头。鬼武者的真实语料和游戏内结果来自 PR 作者，本机只有合成测试；其余 per-target 版本仍缺真实语料，mesh/amplification 语义未验证。MDF 已登记 2.10/2.13（RE2/RE3）、2.19/2.21/2.23（RE8/RE2RT/MHRISE）、2.31（SF6）、2.32（RE4）、2.45（荒野）与 2.51（鬼武者）；2.51 目前统一使用鬼武者的 104 字节材质项布局，RE9/Pragmata/DD2 当前版未单独验证。MMTR 已支持样本不等于同引擎全部游戏版本兼容，未知布局必须拒绝。

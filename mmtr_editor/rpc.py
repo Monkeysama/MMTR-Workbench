@@ -35,7 +35,7 @@ class Service:
         if not d:
             return None
         info = d.current_info()
-        return {**{k: info[k] for k in ['source','size','sha256','record_count','shader_count','stages','shader_models','candidate_groups']},
+        return {**{k: info[k] for k in ['source','size','sha256','game','resource_version','record_size','header_layout','runtime_cache_keys','material_header_bytes','record_count','shader_count','stages','shader_models','candidate_groups']},
                 'dirty': d.dirty, 'integrity': d.integrity,
                 'changes': {'shaders': list(d.replacements), 'names': len(d.renames),
                             'references': len(d.redirects), 'metadata': len(d.metadata_edits)},

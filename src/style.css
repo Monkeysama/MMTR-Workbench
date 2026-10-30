@@ -1032,6 +1032,11 @@ pre:focus-visible {
   color: #697588;
   margin: 0 0 24px;
 }
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .welcome-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

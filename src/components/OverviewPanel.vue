@@ -99,8 +99,19 @@ const groups = computed(() =>
           <ElDescriptionsItem label="文件大小">{{
             bytes(doc.size)
           }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="游戏 / 资源版本"
+            ><span class="mono">{{ doc.game }}</span> ·
+            {{ doc.resource_version }}</ElDescriptionsItem
+          >
           <ElDescriptionsItem label="通道记录"
-            ><span class="mono">0x110</span> 字节 / 条</ElDescriptionsItem
+            ><span class="mono">0x{{ doc.record_size.toString(16) }}</span>
+            字节 / 条 · {{ doc.header_layout === "per-target" ? "每目标分组" : "统一分组" }}</ElDescriptionsItem
+          >
+          <ElDescriptionsItem label="运行时缓存键"
+            >{{ doc.runtime_cache_keys ? "8 字节 / Shader" : "无" }}</ElDescriptionsItem
+          >
+          <ElDescriptionsItem v-if="doc.material_header_bytes" label="材质头"
+            >{{ doc.material_header_bytes }} 字节</ElDescriptionsItem
           >
           <ElDescriptionsItem label="名称 Hash"
             ><span class="mono">Murmur3</span> · seed

@@ -26,7 +26,7 @@ function inspectBinding() { detailTab.value = "binding"; emit("link"); }
   <div class="mdf-workspace">
     <div class="mdf-file-strip">
       <strong :title="doc.source">{{ basename(doc.source) }}</strong>
-      <span>MDF {{ doc.version }} · {{ bytes(doc.size) }}</span>
+      <span>MDF 2.{{ doc.version }} · {{ bytes(doc.size) }}</span>
       <span>{{ doc.material_count }} 个材质</span>
       <ElTag v-if="doc.dirty" type="warning" effect="plain">{{ doc.unsaved ? "有未保存修改" : "修改已导出" }}</ElTag>
       <span v-if="saving" class="secondary-text" role="status">正在暂存…</span>

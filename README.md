@@ -2,6 +2,20 @@
 
 用于 RE Engine MMTR 着色器与 MDF 材质文件的桌面编辑器。已登记荒野、RE4、SF6、旧版 DD2、RE8/MHRISE/RE2RT/RE2/RE3 以及 RE9/Pragmata/当前 DD2/鬼武者的 per-target 布局；各游戏的语料与验证边界见 [多游戏支持](docs/game-support.md)，RE4 的差异见 [RE4 支持](docs/re4-support.md)，鬼武者见 [鬼武者支持](docs/oniwots-support.md)。
 
+## 支持范围
+
+桌面界面左下角“支持范围”显示完整矩阵，并根据当前打开的文件标出格式与证据等级。等级只表示证据强度，不表示同一游戏的所有材质或 Shader 都已验证：
+
+| 证据等级 | 游戏 | 当前边界 |
+|---|---|---|
+| 游戏内已验证 | MH Wilds | 真实语料与游戏内加载 |
+| 作者报告游戏内 | 鬼武者 WotS / Demo | PR 作者报告 550 个 MMTR、33 个 MDF 和游戏内测试通过；本机只跑合成测试 |
+| 真实语料 | MHRISE；RE4（既有支持，本轮未重验） | MHRISE 用 3 个真实 MMTR 与提取 MDF 完成解析、重存和增删，未进游戏 |
+| 仅合成测试 | RE8、RE2 RT、RE2、RE3、SF6、DD2 旧版 | 按布局表构造数据验证实现；DD2 旧版只开放 MMTR |
+| 仅 MMTR | RE9、Pragmata、DD2 当前版 | MDF 2.51 目前统一按鬼武者布局登记，未单独验证 |
+
+共登记 16 个 MMTR 资源版本与 9 个 MDF 版本（2.10、2.13、2.19、2.21、2.23、2.31、2.32、2.45、2.51）。未知版本或布局会拒绝打开；MDF 2.51 的 RE9/Pragmata/DD2 当前版在接入真实语料前不应视为已确认支持。
+
 ## 功能
 
 - 浏览已登记布局的 MMTR（荒野 4/5 组，RE4/SF6/旧版 DD2/MHRISE 3 组，RE8/RE2RT 5 组，RE2/RE3 4 组，RE9/Pragmata/当前 DD2/鬼武者 4 个 per-target 目标）的渲染通道、Shader、常量缓冲和资源，支持带数字版本后缀的文件。
