@@ -1,4 +1,4 @@
-"""Byte-preserving MDF 2.45 (MH Wilds) / 2.32 (RE4) reader and MDF/MMTR binding diagnostics.
+"""Byte-preserving MDF 2.31 (SF6) / 2.32 (RE4) / 2.45 (MH Wilds) reader and MDF/MMTR binding diagnostics.
 
 The Blender add-on supplied the format reference, but this module deliberately
 keeps the editor independent from Blender and does not implement a full
@@ -20,9 +20,10 @@ class MdfError(ValueError):
     pass
 
 
-# MDF 版本 → (游戏, master 根目录)。2.32 与 2.45 的材质项（100 字节）、属性头与纹理头布局相同；
-# RE4 原版材质没有 MMTRS 表（指针为 0）。只登记有原版语料核对的版本。
-MDF_VERSIONS = {45: ('MHWilds', 'MaterialShader/'), 32: ('RE4', '_Chainsaw/MasterMaterial/')}
+# MDF 版本 → (游戏, master 根目录)。2.31/2.32/2.45 的材质项（100 字节）、属性头与纹理头布局相同；
+# RE4 原版材质没有 MMTRS 表（指针为 0）。只登记已核对布局或原版目录结构的版本。
+MDF_VERSIONS = {31: ('SF6', 'product/mastermaterial/'), 45: ('MHWilds', 'MaterialShader/'),
+                32: ('RE4', '_Chainsaw/MasterMaterial/')}
 
 
 def master_root_ok(path: str, version: int | None = None) -> bool:
@@ -104,7 +105,7 @@ def _public_data(value: Any) -> Any:
 
 
 class MdfDocument:
-    """Parsed MDF 2.45 / 2.32 document.
+    """Parsed MDF 2.31 / 2.32 / 2.45 document.
 
     原始字节用于固定宽度编辑；发生参数或纹理槽增删时，只重建被修改
     材质的尾部表和数据块，并把新块追加到文件末尾。这样可以保留其它
@@ -122,7 +123,8 @@ class MdfDocument:
         self.source = Path(source).resolve() if source else None
         self.version = int(self.source.suffix[1:]) if self.source and self.source.suffix[1:].isdigit() else 45
         if self.version not in MDF_VERSIONS:
-            raise MdfError(f"当前联动适配器只接受 MHWILDS MDF 2.45 与 RE4 MDF 2.32，收到 .{self.version}")
+            supported = '、'.join(f'{game} MDF 2.{version}' for version, (game, _root) in sorted(MDF_VERSIONS.items()))
+            raise MdfError(f'当前联动适配器只接受已登记的 MDF 版本（{supported}），收到 .{self.version}')
         self.game, self.master_root = MDF_VERSIONS[self.version]
         self.material_count = _u16(data, 6)
         if 16 + self.material_count * self.MATERIAL_SIZE > len(data):

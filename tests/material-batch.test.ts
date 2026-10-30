@@ -38,6 +38,7 @@ test("取消中仍在运行，成功/失败/过期才是终态", () => {
 test("独立变体默认 master 随 MDF 游戏切换，不覆盖手动填写的值", () => {
   assert.equal(defaultVariantMaster(), "MaterialShader/Variation/variant.mmtr");
   assert.equal(defaultVariantMaster("RE4"), "_Chainsaw/MasterMaterial/Variation/variant.mmtr");
+  assert.equal(defaultVariantMaster("SF6"), "product/mastermaterial/Variation/variant.mmtr");
   assert.equal(variantMasterFor("MaterialShader/Variation/variant.mmtr", "RE4"), defaultVariantMaster("RE4"));
   assert.equal(variantMasterFor(defaultVariantMaster("RE4"), "MHWilds"), defaultVariantMaster("MHWilds"));
   assert.equal(variantMasterFor("MaterialShader/Custom/a.mmtr", "RE4"), "MaterialShader/Custom/a.mmtr");

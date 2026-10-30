@@ -173,7 +173,7 @@ class Re4MdfTests(unittest.TestCase):
 
     def test_unregistered_mdf_version_is_rejected(self):
         with self.assertRaisesRegex(MdfError, '2.32'):
-            MdfDocument(mdf_fixture(), Path('synthetic.mdf2.31'))
+            MdfDocument(mdf_fixture(), Path('synthetic.mdf2.50'))
 
 
 if __name__ == '__main__':

@@ -252,12 +252,12 @@ class Document:
         try:
             _, self.info = inspect_data(self.original, self.source)
             groups = self.info['header_u16_04']
-            # 只放开各游戏已研究的组数（荒野四/五组，RE4 三组）；声明记录必须完整，不能接受兼容扫描的截断结果。
-            allowed = next(g for game, _size, g in FORMATS.values() if game == self.info['game'])
+            # 只放开各游戏已研究的组数（荒野四/五组，RE4/SF6/旧版 DD2 三组）；声明记录必须完整，不能接受兼容扫描的截断结果。
+            allowed = {g for game, _size, groups in FORMATS.values() if game == self.info['game'] for g in groups}
             if (groups not in allowed or len(self.info['candidate_groups']) != groups
                     or self.info['record_count'] != groups * self.info['header_u16_06']
                     or any(not g['name_sequence_matches_first'] for g in self.info['candidate_groups'])):
-                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组）。')
+                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
         self.replacements: dict[int, bytes] = {}

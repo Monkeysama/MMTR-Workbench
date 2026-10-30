@@ -1,4 +1,4 @@
-"""Read-only SDF/MMTR inspection for the MH Wilds and RE4 shader families (see FORMATS).
+"""Read-only SDF/MMTR inspection for the registered RE Engine shader families (see FORMATS).
 
 The SDF record layout is inferred from shipped files, not an official schema.
 DXBC/DXIL structures are decoded independently and bounds checked.
@@ -22,7 +22,9 @@ RECORD_START = 0x10
 RECORD_SIZE = 0x110
 # 资源版本（文件名后缀）→ (游戏, 记录长度, 已核对的组数)。两种记录在 0xFF 之前逐字段相同；荒野在 0x100..0x107
 # 多出 8 字节（全部原版语料为零），其后的 compute 线程组与拓扑随之后移。
-FORMATS = {240906211: ("MHWilds", 0x110, (4, 5)), 221007879: ("RE4", 0x108, (3,))}
+FORMATS = {240906211: ("MHWilds", 0x110, (4, 5)), 221007879: ("RE4", 0x108, (3,)),
+           221102761: ("SF6", 0x108, (3,)), 250109895: ("SF6", 0x108, (3,)),
+           240112003: ("DD2", 0x108, (3,)), 240423143: ("DD2", 0x108, (3,))}
 TABLE_FIELDS = {"cbuffers": (0x70, 0xF6, 32), "samplers": (0x80, 0xF7, 16),
                 "srvs": (0x90, 0xFC, 16), "uavs": (0xA0, 0xFD, 16)}
 
@@ -118,7 +120,12 @@ def inspect_data(data, path):
         game, record_size, _groups = FORMATS[version]
         return _inspect_layout(data, path, game, record_size, version)
     results, errors = [], []
+    seen = set()
     for game, record_size, _groups in FORMATS.values():
+        # 同一记录长度由多个资源版本共用；无后缀时不要把相同布局重复计为歧义。
+        if record_size in seen:
+            continue
+        seen.add(record_size)
         try:
             results.append(_inspect_layout(data, path, game, record_size, version))
         except ValueError as exc:

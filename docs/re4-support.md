@@ -1,6 +1,6 @@
 # RE4 支持
 
-2026-10-28。结论：RE4（BIOHAZARD RE:4）的 MMTR `.mmtr.221007879` 与 MDF `.mdf2.32` 可以打开、浏览、编辑 MDF、新增 UserMaterial 参数、替换 Shader 并另存；原样另存逐字节一致。新增 Texture2D 仍被拒绝，见第四节。除第五节的一次游戏内测试外，均为 CPU 静态证据。
+2026-10-28。多游戏路线与当前阶段见 [game-support.md](game-support.md)。结论：RE4（BIOHAZARD RE:4）的 MMTR `.mmtr.221007879` 与 MDF `.mdf2.32` 可以打开、浏览、编辑 MDF、新增 UserMaterial 参数、替换 Shader 并另存；原样另存逐字节一致。新增 Texture2D 仍被拒绝，见第四节。除第五节的一次游戏内测试外，均为 CPU 静态证据。
 
 前五节记录 [PR #4](https://github.com/Monkeysama/MMTR-Workbench/pull/4) 作者在 2026-10-28 的验证，包括其本地语料与游戏结果。2026-10-29 合入现有优化代码时的复核见第六节，未重新执行游戏测试。
 
@@ -24,7 +24,7 @@
 
 - 记录长度按文件名的资源版本选择（`inspect_mmtr.FORMATS`），组数按游戏检查。
 - 无版本后缀或未登记版本时，依次尝试已知记录长度，只接受恰好一种能完整解析的文件；都失败时报荒野布局的错误，都成功时拒绝。
-- MDF 版本取文件名后缀，只接受 32 与 45。master 根目录与导出后缀按打开的 MDF 版本校验。
+- MDF 版本取文件名后缀，只接受已登记的 31、32 与 45。master 根目录与导出后缀按打开的 MDF 版本校验。
 
 ## 三、验证
 

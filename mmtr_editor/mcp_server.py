@@ -643,7 +643,7 @@ def create_server(session=None):
 
     @tool(write=True, transaction='mdf')
     def workbench_set_master(path: str, material_index: Index | None = None) -> dict[str, Any]:
-        """将指定MDF材质改用另一个MMTR，例如MaterialShader/Variation/test.mmtr 或 RE4 的 _Chainsaw/MasterMaterial/Master/test.mmtr（不带版本后缀）。
+        """将指定MDF材质改用另一个MMTR，例如荒野的 MaterialShader/Variation/test.mmtr、RE4 的 _Chainsaw/MasterMaterial/Master/test.mmtr 或 SF6 的 product/mastermaterial/character/test.mmtr（不带版本后缀）。
         只改所选材质，不改其它共享master的材质；不复制MMTR或证明新Shader兼容。
         导出MMTR/MDF后重新打开匹配路径可检查关联；路径错误或重解析失败整体回滚。
         """
