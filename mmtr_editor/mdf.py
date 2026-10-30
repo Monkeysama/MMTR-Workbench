@@ -52,14 +52,12 @@ _LAYOUT_V19 = {
     'flags': 36, 'flags_count': 1, 'shader_lod': None, 'prop_headers': 40,
     'tex_headers': 48, 'gpbf': 56,
     'prop_data': 64, 'master': 72, 'mmtrs': None, 'shader_redirects': None,
-    'prop_flags': None,
 }
 _LAYOUT_V13 = {
     **_LAYOUT_V31, 'material_size': 64, 'gpbf_name_count': None, 'gpbf_path_count': None,
     'bake': None, 'shader_type': 24, 'flags': 28, 'flags_count': 1, 'shader_lod': None,
     'prop_headers': 32, 'tex_headers': 40, 'gpbf': None, 'prop_data': 48,
     'master': 56, 'mmtrs': None, 'shader_redirects': None,
-    'prop_flags': None,
 }
 _LAYOUT_V7 = {
     **_LAYOUT_V13, 'texture_size': 24, 'prop_rel': 20, 'prop_count_in_header': 16,
@@ -369,11 +367,11 @@ class MdfDocument:
         material = self.material(index)
         if any(value is not None and (type(value) is not int or not 0 <= value <= 0xffffffff) for value in (flags_a, flags_b)):
             raise MdfError('flags 必须是 32 位无符号整数')
+        if flags_b is not None and self.layout['flags_count'] < 2:
+            raise MdfError('该 MDF 版本没有第二个 flags 字段。')
         for lane, value in ((0, flags_a), (1, flags_b)):
             if value is None:
                 continue
-            if lane >= self.layout['flags_count']:
-                raise MdfError('该 MDF 版本没有第二个 flags 字段。')
             offset = material["offset"] + self.layout['flags'] + lane * 4
             self._patch(offset, struct.pack("<I", value))
             material["flags"][lane] = value

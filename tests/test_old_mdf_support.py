@@ -128,8 +128,61 @@ class OldMdfTests(unittest.TestCase):
                     doc.set_setting(0, 'shader_lod', 1)
                 with self.assertRaises(MdfError):
                     doc.set_setting(0, 'bake_texture_array_size', 1)
-                with self.assertRaises(MdfError):
-                    doc.add_property(0, 'Flagged', [1.0], flags=1)
+                if version == 10:
+                    with self.assertRaises(MdfError):
+                        doc.add_property(0, 'Flagged', [1.0], flags=1)
+
+    def test_old_property_flags_survive_structural_changes(self):
+        for version in (13, 19, 21, 23):
+            for operation in ('add_texture', 'delete_texture', 'add_property', 'delete_property'):
+                with self.subTest(version=version, operation=operation):
+                    data = bytearray(fixture(version))
+                    layout = MDF_LAYOUTS[version]
+                    for index, flags in ((0, 0x1234), (1, 0x4321)):
+                        table = struct.unpack_from('<Q', data, 16 + index * layout['material_size'] + layout['prop_headers'])[0]
+                        struct.pack_into('<H', data, table + 22, flags)
+                    source = Path(f'sample.mdf2.{version}')
+                    doc = MdfDocument(data, source)
+                    self.assertEqual(doc.material(0)['properties'][0]['flags'], 0x1234)
+                    if operation == 'add_texture':
+                        doc.add_texture(0, 'ExtraMap', 'Textures/extra.tex')
+                    elif operation == 'delete_texture':
+                        doc.delete_texture(0, 0)
+                    elif operation == 'add_property':
+                        doc.add_property(0, 'Added', [1.0], flags=0x4567, offset=4)
+                    else:
+                        doc.add_property(0, 'Added', [1.0], flags=0x4567, offset=4)
+                        initial, _ = doc.build()
+                        doc = MdfDocument(initial, source)
+                        doc.delete_property(0, 'Added')
+                    result, report = doc.build()
+                    again = MdfDocument(result, source)
+                    self.assertEqual(again.material(0)['properties'][0]['flags'], 0x1234)
+                    self.assertEqual(again.material(1)['properties'][0]['flags'], 0x4321)
+                    self.assertTrue(report['reparse_valid'])
+                    if operation == 'add_property':
+                        self.assertEqual(again.material(0)['properties'][1]['flags'], 0x4567)
+
+    def test_rejected_combined_flags_leave_rpc_candidate_unchanged(self):
+        from mmtr_editor.rpc import Service
+
+        for version in (10, 13, 19, 21, 23):
+            for prior_edit in (False, True):
+                with self.subTest(version=version, prior_edit=prior_edit):
+                    doc = self.open(version)
+                    if prior_edit:
+                        doc.set_flags(0, 7)
+                    service = Service()
+                    service.mdf = doc
+                    before_snapshot = doc.snapshot(0)
+                    before_bytes, before_report = doc.build()
+                    with self.assertRaisesRegex(MdfError, '没有第二个 flags'):
+                        service.handle({'op': 'mdf_set_flags', 'material_index': 0,
+                                        'flags_a': 1, 'flags_b': 1})
+                    self.assertEqual(doc.snapshot(0), before_snapshot)
+                    after_bytes, after_report = doc.build()
+                    self.assertEqual(after_bytes, before_bytes)
+                    self.assertEqual(after_report['changes'], before_report['changes'])
 
     def test_re8_master_root_is_enforced(self):
         doc = self.open(19)
