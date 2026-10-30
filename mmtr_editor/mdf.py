@@ -36,7 +36,8 @@ MDF_VERSIONS = {
 # 材质头、属性头和纹理头的版本差异。字段偏移按 REasy mdf_file.py 的 MatHeader/ParamHeader/TexHeader
 # 读取顺序独立核对；v31–45 为 100 字节材质项，v19–30 为 80 字节，v13–18 为 64 字节，
 # v7–12 仍为 64 字节但属性头顺序不同。v51（鬼武者）材质项为 104 字节：属性数之后多一个
-# `float_count`（属性数据末端 float 数，不含末尾对齐），其后各字段后移 4 字节；属性头仍为 v31。
+# `float_count`（属性数据末端 float 数，不含末尾对齐），其后各字段后移 4 字节；另有 108 字节
+# 标准头，在 flags 后多 8 字节。两者属性头均为 v31，不能只凭版本号区分。
 _LAYOUT_V31 = {
     'material_size': 100, 'property_size': 24, 'texture_size': 32,
     'name': 0, 'name_hash': 8, 'params_size': 12, 'prop_count': 16, 'tex_count': 20,
@@ -69,6 +70,11 @@ _LAYOUT_V51 = {
        if key not in ('material_size', 'prop_rel', 'prop_count_in_header', 'prop_flags', 'prop_count_size',
                       'prop_layout', 'property_size', 'texture_size', 'shader_redirects')
        and isinstance(value, int) and value > 16},
+}
+_LAYOUT_V51_STANDARD = {
+    **_LAYOUT_V31, 'material_size': 108, 'shader_redirects': None,
+    **{key: _LAYOUT_V31[key] + 8 for key in
+       ('shader_lod', 'prop_headers', 'tex_headers', 'gpbf', 'prop_data', 'master', 'mmtrs')},
 }
 MDF_LAYOUTS = {10: _LAYOUT_V7, 13: _LAYOUT_V13, 19: _LAYOUT_V19, 21: _LAYOUT_V19,
                23: _LAYOUT_V19, 31: _LAYOUT_V31, 32: _LAYOUT_V31, 45: _LAYOUT_V31,
@@ -180,14 +186,33 @@ class MdfDocument:
             supported = '、'.join(f'{game} MDF 2.{version}' for version, (game, _root) in sorted(MDF_VERSIONS.items()))
             raise MdfError(f'当前联动适配器只接受已登记的 MDF 版本：{supported}；收到 .{self.version}')
         self.game, self.master_root = MDF_VERSIONS[self.version]
+        self.material_count = _u16(data, 6)
         self.layout = MDF_LAYOUTS[self.version]
+        if self.version == 51 and self.material_count:
+            candidates = []
+            for layout in (_LAYOUT_V51, _LAYOUT_V51_STANDARD):
+                self.layout = layout
+                self.MATERIAL_SIZE = layout['material_size']
+                self.PROPERTY_SIZE = layout['property_size']
+                self.TEXTURE_SIZE = layout['texture_size']
+                try:
+                    candidates.append((layout, self._mdf51_materials()))
+                except (MdfError, struct.error):
+                    continue
+            if not candidates:
+                raise MdfError('MDF 2.51 材质头不符合已支持布局。')
+            if len(candidates) != 1:
+                raise MdfError('MDF 2.51 材质头存在布局歧义，拒绝猜测。')
+            self.layout, materials = candidates[0]
+            if self.layout is _LAYOUT_V51_STANDARD:
+                self.game = 'Unknown'
         self.MATERIAL_SIZE = self.layout['material_size']
         self.PROPERTY_SIZE = self.layout['property_size']
         self.TEXTURE_SIZE = self.layout['texture_size']
-        self.material_count = _u16(data, 6)
         if 16 + self.material_count * self.MATERIAL_SIZE > len(data):
             raise MdfError("MDF material table exceeds file")
-        self.materials = [self._material(i) for i in range(self.material_count)]
+        self.materials = (materials if self.version == 51 and self.material_count else
+                          [self._material(i) for i in range(self.material_count)])
         self.patches: dict[int, bytes] = {}
         self.texture_edits: dict[tuple[int, int], str] = {}
         self.master_edits: dict[int, str] = {}
@@ -199,6 +224,20 @@ class MdfDocument:
     def open(cls, path: str | Path) -> "MdfDocument":
         p = Path(path)
         return cls(p.read_bytes(), p)
+
+    def _mdf51_materials(self) -> list[dict[str, Any]]:
+        """验证所有材质项和指针；结构编辑后表可在文件任意尾部位置。"""
+        table_end = 16 + self.material_count * self.MATERIAL_SIZE
+        if table_end > len(self.original):
+            raise MdfError('MDF material table exceeds file')
+        fields = ('name', 'prop_headers', 'tex_headers', 'gpbf', 'prop_data', 'master', 'mmtrs')
+        for i in range(self.material_count):
+            base = 16 + i * self.MATERIAL_SIZE
+            for field in fields:
+                pointer = _u64(self.original, base + self.layout[field])
+                if (field == 'name' and not pointer) or (pointer and not table_end <= pointer <= len(self.original)):
+                    raise MdfError(f'material {i} {field} pointer overlaps material table or exceeds MDF')
+        return [self._material(i) for i in range(self.material_count)]
 
     def _material(self, index: int) -> dict[str, Any]:
         data = self.original
