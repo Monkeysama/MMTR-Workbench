@@ -29,6 +29,7 @@ FORMATS = {240906211: ("MHWilds", 0x110, (4, 5), True, "uniform"), 221007879: ("
            240112003: ("DD2", 0x108, (3,), True, "uniform"), 240423143: ("DD2", 0x108, (3,), True, "uniform"),
            2102188797: ("RE8", 0x108, (5,), False, "uniform"), 220427553: ("MHRISE", 0x108, (3,), False, "uniform"),
            2109101635: ("RE2RT", 0x108, (5,), False, "uniform"),
+           1808160001: ("RE2", 0x108, (4,), False, "uniform"), 1905100741: ("RE3", 0x108, (4,), False, "uniform"),
            251112994: ("RE9", 0x110, (4,), True, "per-target"),
            251112995: ("PRAGMATA", 0x110, (4,), True, "per-target"),
            251112814: ("ONIMUSHAWOTSDEMO", 0x110, (4,), True, "per-target"),

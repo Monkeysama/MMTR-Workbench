@@ -11,7 +11,7 @@
 | 已支持 | MH Wilds 240906211 | 0x110，4/5 组 | 2.45 | 原有支持 |
 | 已支持 | RE4 221007879 | 0x108，3 组 | 2.32 | 原有支持 |
 | B | RE8 2102188797、MHRISE 220427553、RE2RT 2109101635 | 0x108，5/3/5 组 | 2.19/2.23/2.21 | MMTR 已加无缓存键识别；MDF 已加 80 字节材质项分支与合成测试；均无本机原版语料 |
-| C | RE2 1808160001、RE3 1905100741 | 0x108，4 组 | 2.10/2.13 | MMTR 已加识别；MDF 已加 64 字节材质项和 24 字节纹理头分支与合成测试；无本机原版语料 |
+| C | RE2 1808160001、RE3 1905100741 | 0x108，4 组 | 2.10/2.13 | MMTR 已加无缓存键识别与合成测试；MDF 已加 64 字节材质项和 24 字节纹理头分支与合成测试；无本机原版语料 |
 | D | RE9 251112994、Pragmata 251112995、当前 DD2 260511270、Onimusha WotS 260605155、Onimusha WotS Demo 251112814 | 0x110，per-target 头，4 组 | 2.51 等 | MMTR 已加 per-target 头识别与合成测试；mesh/amplification Shader 语义和 MDF 2.51 尚未实现；无本机原版语料 |
 
 ## 依据
@@ -28,6 +28,7 @@
 - `tests/test_tier_d_support.py` 验证五个 0x110 per-target 版本、4 个 target 的不等计数、头填充必须为零、混合零计数拒绝、改名/元数据编辑后的 Shader 指针迁移、结构分组的 target 归属。
 - `tests/test_sf6_dd2_support.py` 验证资源版本选择、3 组约束、0x108 记录长度、SF6 MDF 2.31 的 master 根目录、未登记 MDF 版本的拒绝。
 - `tests/test_re8_mhrise_support.py` 验证 RE8/MHRISE/RE2RT 的 0x108 无缓存键解析、Shader 首尾相接、组数约束、改名重建和结构报告不虚构状态缓存键。
+- `tests/test_re2_re3_support.py` 验证 RE2/RE3 的 0x108 四组、无缓存键解析、改名重建与组数拒绝。
 - `tests/test_old_mdf_support.py` 用合成 MDF 验证 2.10/2.13/2.19/2.21/2.23 的材质项、属性头、纹理头（24/32 字节）、master 根目录、参数/纹理编辑、结构性增删，以及旧版本没有第二组 flags、bake 或 shader LOD 时拒绝写入。
 - 这些测试不证明 Shader 语义、参数读取、纹理接口或游戏内加载。Tier D 的 mesh/amplification 语义与 MDF 2.51 仍未实现。接入真实语料后，至少要用原版 MMTR/MDF 做逐字节重存、结构诊断、参数追加和一次游戏内验证。
 - 新增 Texture2D 的现有计算阶段限制仍适用；RE4 的 `PreTransform*VFXCS` 读取材质纹理时会被拒绝，SF6/DD2 不能据此推定可用。

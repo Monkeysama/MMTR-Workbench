@@ -264,7 +264,7 @@ class Document:
                                  for i, g in enumerate(self.info['candidate_groups'])))
             if (groups not in allowed or len(self.info['candidate_groups']) != groups
                     or not counts_ok or not sequence_ok):
-                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组；per-target 四组：RE9/PRAGMATA/DD2/ONIMUSHA）。')
+                raise EditError('当前版本仅支持完整的同名序列 SDF/MMTR 布局（荒野四组或五组，RE4 三组，SF6 三组，旧版 DD2 三组，RE8 五组，RE2RT 五组，MHRISE 三组，RE2 四组，RE3 四组；per-target 四组：RE9/PRAGMATA/DD2/ONIMUSHA）。')
         except (ValueError, struct.error, IndexError, UnicodeError) as exc:
             raise EditError(f'无法打开 MMTR：{exc}') from exc
         self.replacements: dict[int, bytes] = {}
