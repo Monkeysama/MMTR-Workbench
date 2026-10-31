@@ -83,5 +83,5 @@ function remove(id: number) { emit("update:rows", props.rows.filter(row => row.i
 .batch-actions { display: flex; gap: 8px; align-items: center; }
 .record-select { margin-left: auto; width: 360px; }
 .batch-rows { display: flex; flex-direction: column; gap: 10px; max-height: 40vh; overflow: auto; }
-.plan-summary { padding: 12px; background: var(--el-fill-color-light); line-height: 1.8; border-radius: 6px; }
+.plan-summary { padding: 12px; background: var(--el-fill-color-light); line-height: 1.8; border-radius: 2px; }
 </style>

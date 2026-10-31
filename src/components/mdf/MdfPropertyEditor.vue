@@ -33,8 +33,8 @@ function pick(value: string | null) {
 .mdf-property-editor { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mdf-components { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .mdf-component { display: flex; align-items: center; gap: 3px; min-width: 0; }
-.mdf-component > span { font-size: 10px; color: #7b8491; flex-shrink: 0; }
-.mdf-component > .color-channel { font-weight: 600; color: #536171; }
+.mdf-component > span { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+.mdf-component > .color-channel { font-weight: 600; color: var(--muted); }
 .mdf-property-editor :deep(.el-color-picker) { height: 24px; flex-shrink: 0; }
 .mdf-property-editor :deep(.el-color-picker__trigger) { height: 24px; width: 28px; padding: 2px; }
 .mdf-property-editor :deep(.el-checkbox) { margin: 0; height: 24px; }

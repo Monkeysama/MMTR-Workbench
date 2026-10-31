@@ -19,7 +19,7 @@ export function useWorkspaces() {
   function register(id: string, controller: DocumentController) { controllers.set(id, controller); }
   function update(id: string, state: DocumentState) {
     tabs.value = tabs.value.map(item => item.id === id ? {
-      ...item, ...state, label: state.source || state.mdfSource ? basename(state.source ?? state.mdfSource!) : "未打开文档",
+      ...item, ...state, label: state.source || state.mdfSource ? basename(state.source ?? state.mdfSource!) : "新工作区",
     } : item);
   }
   function activate(id: string) {
@@ -28,14 +28,14 @@ export function useWorkspaces() {
   async function controller(id: string) {
     await nextTick();
     const value = controllers.get(id);
-    if (!value) throw new Error("文档视图尚未就绪，请稍后重试。");
-    if (!await value.ready) throw new Error("文档初始化失败，请刷新窗口后重试。");
+    if (!value) throw new Error("工作区尚未就绪，请稍后重试。");
+    if (!await value.ready) throw new Error("工作区初始化失败，请刷新窗口后重试。");
     return value;
   }
   async function create() {
     const id = `document-${crypto.randomUUID()}`;
     await request("workspace_new", { document_id: id });
-    tabs.value = [...tabs.value, { id, label: "未打开文档", source: null, mdfSource: null, dirty: false, busy: false, modal: false }];
+    tabs.value = [...tabs.value, { id, label: "新工作区", source: null, mdfSource: null, dirty: false, busy: false, modal: false }];
     activeId.value = id;
     await controller(id);
     return id;
@@ -125,7 +125,7 @@ export function useWorkspaces() {
     await perform(async () => {
       const result = await request<{ documents: Array<{ document_id: string; source: string | null; mdf_source: string | null; dirty: boolean; pending: boolean }> }>("workspace_list");
       tabs.value = result.documents.map(item => ({ id: item.document_id, source: item.source, mdfSource: item.mdf_source,
-        label: basename(item.source ?? item.mdf_source ?? "未打开文档"), dirty: item.dirty, busy: item.pending, modal: false }));
+        label: basename(item.source ?? item.mdf_source ?? "新工作区"), dirty: item.dirty, busy: item.pending, modal: false }));
       activeId.value = tabs.value[0]?.id ?? "";
       if (!tabs.value.length) await create();
     });

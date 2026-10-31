@@ -192,7 +192,6 @@ function select(row: Shader) {
                 <ElEmpty description="点击反汇编，生成可读伪代码"
                   ><template #image><Code2 :size="56" /></template></ElEmpty
                 ><ElButton
-                  type="primary"
                   :loading="busy"
                   @click="emit('disassemble')"
                   >生成可读代码</ElButton

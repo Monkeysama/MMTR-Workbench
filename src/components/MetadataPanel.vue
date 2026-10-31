@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from "vue";
 import {
   ElInput,
   ElSelect,
@@ -21,6 +21,18 @@ const validationLabel = computed(() => props.validation?.scope === "associated_l
 const search = shallowRef(""),
   buffer = shallowRef("UserMaterial"),
   page = shallowRef(1);
+// 窄屏隐藏低优先级列，更窄时把缓冲和偏移并入名称单元格，保留编辑操作。
+const compact = shallowRef(false);
+const narrow = shallowRef(false);
+function syncViewport() {
+  compact.value = window.matchMedia("(max-width: 960px)").matches;
+  narrow.value = window.matchMedia("(max-width: 520px)").matches;
+}
+onMounted(() => {
+  syncViewport();
+  window.addEventListener("resize", syncViewport);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", syncViewport));
 const buffers = computed(() =>
   [...new Set(props.doc.metadata.map((m) => m.buffer || m.kind))].sort(),
 );
@@ -105,6 +117,7 @@ watch(
           ><Download :size="17" /></ElButton></span></ElTooltip
         >
       </div>
+      <p class="compact-table-hint">左右滚动表格，查看完整参数列。</p>
       <ElAlert v-if="validation" :type="validation.state === 'passed' ? 'success' : validation.state === 'failed' ? 'error' : 'info'" :closable="false"
         :title="validation.state === 'skipped' ? '未执行验证 · 没有 metadata 修改' : `${validationLabel}验证${validation.state === 'passed' ? '通过' : '失败'} · 检查 ${validation.checkedShaders} 个 Shader、${validation.checkedRecords} 条记录`">
         <template v-if="validation.state === 'failed'"><ul class="validation-issues"><li v-for="(issue, index) in validation.issues" :key="`${issue.kind}:${issue.name}:${index}`">{{ issue.problem ?? `${issue.kind} ${issue.name ?? ''}` }}<span v-if="issue.shader_index !== undefined"> · Shader {{ issue.shader_index }}</span></li></ul></template>
@@ -116,31 +129,32 @@ watch(
         ><ElTableColumn
           prop="name"
           label="名称"
-          min-width="280"
+          :min-width="narrow ? 230 : compact ? 250 : 280"
           show-overflow-tooltip
           ><template #default="{ row }"
-            ><span class="mono">{{ row.name }}</span></template
+            ><span class="mono">{{ row.name }}</span><span v-if="narrow" class="metadata-row-meta">{{ row.buffer || row.kind }} · {{ row.byteOffset === null ? "—" : hex(row.byteOffset) }}</span></template
           ></ElTableColumn
         ><ElTableColumn
+          v-if="!narrow"
           label="类型 / 缓冲"
-          min-width="170"
+          :width="compact ? 150 : 170"
           show-overflow-tooltip
           ><template #default="{ row }"
             ><ElTag type="info" effect="plain">{{
               row.buffer || row.kind
             }}</ElTag></template
           ></ElTableColumn
-        ><ElTableColumn label="缓冲偏移" width="120"
+        ><ElTableColumn v-if="!narrow" label="缓冲偏移" :width="compact ? 110 : 120"
           ><template #default="{ row }"
             ><span class="mono">{{
               row.byteOffset === null ? "—" : hex(row.byteOffset)
             }}</span></template
           ></ElTableColumn
-        ><ElTableColumn label="大小" width="95"
+        ><ElTableColumn v-if="!compact" label="大小" width="95"
           ><template #default="{ row }">{{
             row.size === null ? "—" : `${row.size} B`
           }}</template></ElTableColumn
-        ><ElTableColumn label="记录位置" width="130"
+        ><ElTableColumn v-if="!compact" label="记录位置" width="130"
           ><template #default="{ row }"
             ><span class="mono secondary-text">{{
               hex(row.offset)
@@ -191,4 +205,9 @@ watch(
 .metadata-actions :deep(.el-button) { margin: 0; padding: 4px; }
 .validation-issues { max-height: 160px; overflow: auto; margin: 6px 0 0; padding-left: 18px; }
 .data-panel > .el-alert { flex-shrink: 0; }
+.metadata-row-meta { display: block; margin-top: 3px; font: 10px var(--mono); color: var(--muted); }
+.compact-table-hint { display: none; }
+@media (min-width: 521px) and (max-width: 680px) {
+  .compact-table-hint { display: block; margin: 0; padding: 0 2px; color: var(--muted); font-size: 12px; }
+}
 </style>

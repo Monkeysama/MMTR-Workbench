@@ -43,6 +43,7 @@ watch(
 <template>
   <div class="feature-stack">
     <ElAlert
+      class="source-note"
       type="info"
       :closable="false"
       show-icon
@@ -110,4 +111,7 @@ watch(
 <style scoped>
 .source-edit-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .source-edit-pane > .code-workspace { flex: 1; height: auto; min-height: 0; }
+@media (max-width: 520px) {
+  .source-note { display: none; }
+}
 </style>

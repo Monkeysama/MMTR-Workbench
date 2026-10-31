@@ -163,35 +163,50 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
 
 <style scoped>
 .support-title { display: flex; align-items: flex-start; gap: 12px; color: var(--ink); }
-.support-title h2 { margin: 0; color: #29364b; font-size: 21px; }
-.support-title p { margin: 4px 0 0; color: #697588; font-size: 14px; }
+.support-title h2 { margin: 0; color: var(--ink); font-size: 21px; }
+.support-title p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 .support-body { max-height: 70vh; overflow: auto; padding-right: 4px; }
-.support-current { border: 1px solid var(--edge); background: var(--surface-muted); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; }
+.support-current { border: 1px solid var(--edge); background: var(--surface-muted); border-radius: 2px; padding: 16px 18px; margin-bottom: 16px; }
 .support-current-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.support-current-head strong { display: block; margin-top: 4px; color: #29364b; font-size: 17px; }
+.support-current-head strong { display: block; margin-top: 4px; color: var(--ink); font-size: 17px; }
 .support-current-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 14px; }
 .support-current-grid small, .support-current-grid b { display: block; }
-.support-current-grid small { color: #718097; font-size: 12px; margin-bottom: 3px; }
-.support-current-grid b { color: #30343b; font-size: 14px; font-weight: 600; }
-.support-mdf, .support-current-note { margin: 12px 0 0; color: #526174; font-size: 13px; line-height: 1.7; }
-.support-warn { color: #a15c00; }
-.support-empty { color: #697588; font-size: 14px; margin: 0 0 14px; }
-.support-intro { color: #697588; font-size: 13px; line-height: 1.8; margin: 8px 0 14px; }
-.support-section-title { color: #29364b; font-size: 15px; margin: 20px 0 10px; }
-.support-table-wrap { border: 1px solid #e1e5eb; border-radius: 6px; overflow-x: auto; }
+.support-current-grid small { color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+.support-current-grid b { color: var(--ink); font-size: 14px; font-weight: 600; }
+.support-mdf, .support-current-note { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.support-warn { color: var(--warning); }
+.support-empty { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+.support-intro { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 8px 0 14px; }
+.support-section-title { color: var(--ink); font-size: 15px; margin: 20px 0 10px; }
+.support-table-wrap { border: 1px solid var(--edge); border-radius: 2px; overflow-x: auto; }
 .support-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
-.support-table th { text-align: left; font-weight: 600; color: #526174; background: var(--surface); padding: 10px 12px; border-bottom: 1px solid #e1e5eb; white-space: nowrap; }
-.support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid #edf0f4; color: #30343b; line-height: 1.6; }
+.support-table th { text-align: left; font-weight: 600; color: var(--muted); background: var(--surface); padding: 10px 12px; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+.support-table td { vertical-align: top; padding: 11px 12px; border-bottom: 1px solid var(--edge); color: var(--ink); line-height: 1.6; }
 .support-table td.mono { white-space: nowrap; }
 .support-table td.support-version-cell { white-space: pre-line; }
 .support-table tr:last-child td { border-bottom: 0; }
-.support-table tr.is-current td { background: #edf2fc; }
+.support-table tr.is-current td { background: var(--accent-soft); }
 .support-table td:first-child b { display: block; font-weight: 600; }
-.support-table td:first-child small { color: #3567c8; font-size: 12px; }
-.support-footnote { color: #718097; font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
+.support-table td:first-child small { color: var(--accent); font-size: 12px; }
+.support-footnote { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
 .mono { font-variant-numeric: tabular-nums; font-size: 13px; }
 @media (max-width: 720px) {
   .support-current-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .support-current-head { flex-wrap: wrap; }
+}
+@media (max-width: 660px) {
+  .support-table-wrap { overflow: visible; border: 0; }
+  .support-table { display: block; min-width: 0; font-size: 13px; }
+  .support-table thead { display: none; }
+  .support-table tbody { display: grid; gap: 10px; }
+  .support-table tr { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--edge); background: var(--surface); }
+  .support-table td { padding: 0; border: 0; white-space: normal; }
+  .support-table td:first-child { font-size: 14px; font-weight: 600; }
+  .support-table td:nth-child(2)::before,
+  .support-table td:nth-child(3)::before { color: var(--muted); font-size: 10px; letter-spacing: 0.04em; }
+  .support-table td:nth-child(2)::before { content: "MMTR "; }
+  .support-table td:nth-child(3)::before { content: "MDF "; }
+  .support-table td.support-version-cell { white-space: pre-line; }
+  .support-table tr.is-current td { background: transparent; }
 }
 </style>

@@ -2,14 +2,14 @@
 import { computed, shallowRef } from "vue";
 import { ArrowLeft } from "lucide-vue-next";
 import { ElButton, ElInput, ElTable, ElTableColumn, ElTabs, ElTabPane, ElTag, ElCheckbox } from "element-plus";
-import { basename, bytes, type MdfDocument, type MdfMaterialSummary, type MdfSetting } from "../types";
+import { type MdfDocument, type MdfMaterialSummary, type MdfSetting } from "../types";
 import MdfMaterialInputs from "./mdf/MdfMaterialInputs.vue";
 import MdfBindingPanel from "./mdf/MdfBindingPanel.vue";
 import MdfMigrationPanel from "./mdf/MdfMigrationPanel.vue";
 import MdfMaterialSettings from "./mdf/MdfMaterialSettings.vue";
 
 const props = defineProps<{ doc: MdfDocument; mmtrLoaded: boolean; busy: boolean; saving: boolean }>();
-const emit = defineEmits<{ select: [index: number]; link: []; edit: [name: string, components: Record<number, number>]; texture: [slot: number, path: string]; "add-property": []; "delete-property": [name: string]; "add-texture": []; "delete-texture": [slot: number]; setting: [field: MdfSetting, value: number]; export: []; reset: []; migrate: []; report: [] }>();
+const emit = defineEmits<{ select: [index: number]; link: []; edit: [name: string, components: Record<number, number>]; texture: [slot: number, path: string]; "add-property": []; "delete-property": [name: string]; "add-texture": []; "delete-texture": [slot: number]; setting: [field: MdfSetting, value: number]; reset: []; migrate: []; report: [] }>();
 const query = shallowRef("");
 const detailOpen = shallowRef(false);
 const onlyLinked = shallowRef(true);
@@ -33,12 +33,10 @@ function selectMaterial(index: number) {
 <template>
   <div class="mdf-workspace">
     <div class="mdf-file-strip">
-      <strong :title="doc.source">{{ basename(doc.source) }}</strong>
-      <span>MDF 2.{{ doc.version }} · {{ bytes(doc.size) }}</span>
-      <span>{{ doc.material_count }} 个材质</span>
+      <span v-if="!doc.dirty && !saving">尚未修改</span>
       <ElTag v-if="doc.dirty" type="warning" effect="plain">{{ doc.unsaved ? "有未保存修改" : "修改已导出" }}</ElTag>
       <span v-if="saving" class="secondary-text" role="status">正在暂存…</span>
-      <div class="mdf-file-actions"><ElButton :disabled="busy || !(doc.dirty || saving)" size="small" @click="emit('reset')">撤销全部修改</ElButton><ElButton :disabled="busy" size="small" type="primary" @click="emit('export')">另存 MDF</ElButton></div>
+      <div class="mdf-file-actions"><ElButton :disabled="busy || !(doc.dirty || saving)" size="small" @click="emit('reset')">撤销全部修改</ElButton></div>
     </div>
     <ElButton v-if="detailOpen" class="mdf-back" text @click="detailOpen = false"><ArrowLeft :size="16" />返回材质列表</ElButton>
     <div class="mdf-layout" :class="{ 'show-material-detail': detailOpen }">
@@ -73,8 +71,8 @@ function selectMaterial(index: number) {
         </ElTabs>
       </section>
       <section v-else class="panel mdf-detail mdf-empty-selection">
-        <p>当前筛选只显示使用已打开 MMTR 的材质。</p>
-        <ElButton size="small" @click="onlyLinked = false">显示全部材质</ElButton>
+        <p>{{ materials.length ? "选择一个材质，编辑参数与纹理槽。" : "当前筛选没有匹配的材质。" }}</p>
+        <ElButton v-if="!materials.length && mmtrLoaded && onlyLinked" size="small" @click="onlyLinked = false">显示全部材质</ElButton>
       </section>
     </div>
   </div>
@@ -82,22 +80,21 @@ function selectMaterial(index: number) {
 
 <style scoped>
 .mdf-workspace { display: flex; flex-direction: column; flex: 1; min-height: 420px; gap: 10px; }
-.mdf-file-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: #697588; }
+.mdf-file-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
 .mdf-file-actions { display: flex; margin-left: auto; gap: 6px; }
 .mdf-file-actions .el-button + .el-button { margin-left: 0; }
-.mdf-file-strip strong { color: #3f4c60; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
 .mdf-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 10px; flex: 1; min-height: 0; }
 .mdf-material-list, .mdf-detail { display: flex; flex-direction: column; min-height: 0; }
-.mdf-workspace :deep(.mdf-feature .el-table .el-table__cell:not(:last-child)) { border-right: 1px solid #dce1e8; }
-.mdf-workspace :deep(.mdf-feature .el-table th.el-table__cell) { color: #4c5868; font-weight: 600; }
-.mdf-workspace :deep(.mdf-feature .el-table td.el-table__cell:first-child) { color: #273447; font-weight: 500; }
+.mdf-workspace :deep(.mdf-feature .el-table .el-table__cell:not(:last-child)) { border-right: 1px solid var(--edge); }
+.mdf-workspace :deep(.mdf-feature .el-table th.el-table__cell) { color: var(--muted); font-weight: 600; }
+.mdf-workspace :deep(.mdf-feature .el-table td.el-table__cell:first-child) { color: var(--ink); font-weight: 500; }
 .mdf-workspace :deep(.mdf-feature .el-table td.is-right) { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
-.mdf-search { padding: 7px 8px; border-bottom: 1px solid #e8ebf0; }
+.mdf-search { padding: 7px 8px; border-bottom: 1px solid var(--edge); }
 .mdf-material-list > .el-table { flex: 1; min-height: 0; }
 .mdf-selected-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px 5px; }
 .mdf-selected-heading h2 { font-size: 15px; margin: 0; }
 .mdf-selected-heading > .el-tag { margin-left: auto; }
-.mdf-master { display: flex; gap: 9px; padding: 0 12px 8px; font-size: 12px; color: #697588; min-width: 0; }
+.mdf-master { display: flex; gap: 9px; padding: 0 12px 8px; font-size: 12px; color: var(--muted); min-width: 0; }
 .mdf-master .mono { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .mdf-detail-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .mdf-detail-tabs > :deep(.el-tabs__header) { margin: 0; padding: 0 12px; flex-shrink: 0; }
@@ -110,7 +107,7 @@ function selectMaterial(index: number) {
 .mdf-workspace :deep(.el-table th.el-table__cell) { height: 32px; }
 .mdf-workspace :deep(.el-table .cell) { line-height: 22px; padding: 0 9px; }
 .mdf-workspace :deep(.el-table__body tr) { cursor: pointer; }
-.mdf-workspace :deep(.el-table .current-row td:first-child) { border-left: 3px solid var(--data-accent); }
+.mdf-workspace :deep(.el-table .current-row td:first-child) { border-left: 1px solid var(--data-accent); }
 .mdf-workspace :deep(.mono) { font-size: 13px; font-variant-numeric: tabular-nums; }
 .mdf-workspace :deep(.secondary-text) { font-size: 12px; }
 .mdf-workspace :deep(.panel-heading) { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
@@ -122,14 +119,14 @@ function selectMaterial(index: number) {
 .mdf-workspace :deep(.el-checkbox) { height: 26px; }
 .mdf-workspace :deep(.el-checkbox__label) { font-size: 12px; }
 .mdf-workspace :deep(.mdf-feature) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.mdf-workspace :deep(.mdf-toolbar) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 7px 10px; flex-shrink: 0; border-bottom: 1px solid #e8ebf0; }
+.mdf-workspace :deep(.mdf-toolbar) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 7px 10px; flex-shrink: 0; border-bottom: 1px solid var(--edge); }
 .mdf-workspace :deep(.mdf-filter) { width: 215px; }
 .mdf-workspace :deep(.mdf-data-tabs) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.mdf-workspace :deep(.mdf-data-tabs > .el-tabs__header) { margin: 0; padding: 0 10px; background: #fafbfc; }
+.mdf-workspace :deep(.mdf-data-tabs > .el-tabs__header) { margin: 0; padding: 0 10px; background: var(--surface-muted); }
 .mdf-workspace :deep(.mdf-data-tabs > .el-tabs__content) { flex: 1; min-height: 0; }
 .mdf-workspace :deep(.mdf-data-tabs > .el-tabs__content > .el-tab-pane) { height: 100%; }
-.mdf-workspace :deep(.mdf-note) { margin: 0; padding: 7px 10px; font-size: 12px; color: #697588; border-bottom: 1px solid #e8ebf0; }
-.mdf-workspace :deep(.mdf-empty) { padding: 20px; color: #697588; font-size: 13px; }
+.mdf-workspace :deep(.mdf-note) { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--edge); }
+.mdf-workspace :deep(.mdf-empty) { padding: 20px; color: var(--muted); font-size: 13px; }
 @media (max-width: 1200px) { .mdf-layout { grid-template-columns: 200px minmax(0, 1fr); } }
 .mdf-back { display: none; }
 @media (max-width: 960px) {
@@ -137,7 +134,6 @@ function selectMaterial(index: number) {
   .mdf-detail, .show-material-detail .mdf-material-list { display: none; }
   .show-material-detail .mdf-detail { display: flex; }
   .mdf-back { display: inline-flex; align-self: flex-start; }
-  .mdf-file-strip strong { max-width: 100%; }
   .mdf-workspace { min-height: 620px; }
   .mdf-workspace :deep(.el-table-fixed-column--right) { position: static !important; }
 }

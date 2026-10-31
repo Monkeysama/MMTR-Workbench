@@ -56,20 +56,20 @@ function bit(lane: number, field: MdfFlagField, value: number) {
   </section>
 </template>
 <style scoped>
-.mdf-settings-region { height: 100%; overflow: auto; padding: 10px; box-sizing: border-box; font-size: 13px; color: #344052; }
-.settings-intro { padding: 4px 0 8px; margin-bottom: 10px; border-bottom: 1px solid #dce1e8; }
-.settings-basics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 0 0 10px; border-bottom: 1px solid #dce1e8; }
+.mdf-settings-region { height: 100%; overflow: auto; padding: 10px; box-sizing: border-box; font-size: 13px; color: var(--ink); }
+.settings-intro { padding: 4px 0 8px; margin-bottom: 10px; border-bottom: 1px solid var(--edge); }
+.settings-basics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 0 0 10px; border-bottom: 1px solid var(--edge); }
 .settings-basics > label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .flags-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .flag-card { padding: 0 10px 0 0; min-width: 0; }
-.flag-card + .flag-card { padding: 0 0 0 10px; border-left: 1px solid #dce1e8; }
-h3 { margin: 0 0 8px; font-size: 13px; } h3 span { font-weight: 400; color: #7b8491; }
+.flag-card + .flag-card { padding: 0 0 0 10px; border-left: 1px solid var(--edge); }
+h3 { margin: 0 0 8px; font-size: 13px; } h3 span { font-weight: 400; color: var(--muted); }
 .flag-grid { display: flex; flex-direction: column; margin-top: 6px; }
 .flag-grid :deep(.el-checkbox) { margin: 0; }
 .flag-grid :deep(.el-checkbox__label) { overflow-wrap: anywhere; white-space: normal; font-size: 12px; }
 .flag-number { display: grid; grid-template-columns: minmax(0, 1fr) 130px; gap: 6px; align-items: center; margin: 3px 0; }
-.settings-extra { padding: 10px 0; margin-top: 10px; border-top: 1px solid #dce1e8; overflow-wrap: anywhere; }
+.settings-extra { padding: 10px 0; margin-top: 10px; border-top: 1px solid var(--edge); overflow-wrap: anywhere; }
 .settings-extra summary { cursor: pointer; } .settings-extra p { font-size: 12px; }
-.settings-error { color: #a62136; padding: 6px 0; }
-@media (max-width: 1100px) { .flags-columns { grid-template-columns: 1fr; } .flag-card + .flag-card { padding: 10px 0 0; border-left: 0; border-top: 1px solid #dce1e8; } }
+.settings-error { color: var(--danger); padding: 6px 0; }
+@media (max-width: 1100px) { .flags-columns { grid-template-columns: 1fr; } .flag-card + .flag-card { padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--edge); } }
 </style>

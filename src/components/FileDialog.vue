@@ -136,6 +136,6 @@ async function browse() {
 
 <style scoped>
 .parameter-fields { display: grid; grid-template-columns: 1.4fr .7fr .9fr; gap: 12px; }
-.parameter-fields label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.parameter-fields label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
 .parameter-fields .wide-field { grid-column: span 2; }
 </style>

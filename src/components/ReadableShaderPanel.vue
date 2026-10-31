@@ -212,7 +212,7 @@ async function copy() {
   align-items: center;
   flex-wrap: wrap;
   padding: 10px 14px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--edge);
   flex-shrink: 0;
 }
 .readable-search {
@@ -224,12 +224,12 @@ async function copy() {
   gap: 8px;
   align-items: center;
   font-size: 13px;
-  color: #667180;
+  color: var(--muted);
 }
 .code-match-controls {
   display: flex;
   align-items: center;
-  color: #667180;
+  color: var(--muted);
   font-size: 13px;
 }
 .code-match-controls .el-button {
@@ -246,7 +246,7 @@ async function copy() {
   flex-wrap: wrap;
   padding: 8px 14px;
   font-size: 13px;
-  color: #667180;
+  color: var(--muted);
   flex-shrink: 0;
 }
 .readable-hint {
@@ -263,8 +263,8 @@ async function copy() {
   gap: 10px;
   padding: 5px 12px;
   font-size: 13px;
-  color: #697588;
-  border-top: 1px solid #e4e7ed;
+  color: var(--muted);
+  border-top: 1px solid var(--edge);
   flex-shrink: 0;
 }
 .readable-trace > span {

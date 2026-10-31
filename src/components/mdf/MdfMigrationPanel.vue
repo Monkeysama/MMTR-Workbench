@@ -56,12 +56,12 @@ function statusType(status: string) {
   </section>
 </template>
 <style scoped>
-.migration-sources { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 3px 8px; padding: 7px 10px; font-size: 12px; color: #697588; }
+.migration-sources { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 3px 8px; padding: 7px 10px; font-size: 12px; color: var(--muted); }
 .migration-sources .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .migration-summary { display: flex; gap: 4px 6px; flex-wrap: wrap; padding: 0 10px 6px; }
-.migration-limits { flex-shrink: 0; padding: 5px 10px 7px; color: #936216; font-size: 12px; border-bottom: 1px solid #e8ebf0; }
+.migration-limits { flex-shrink: 0; padding: 5px 10px 7px; color: var(--warning); font-size: 12px; border-bottom: 1px solid var(--edge); }
 .migration-limits summary { cursor: pointer; }
-.migration-limits p { color: #697588; margin: 6px 0 0 12px; }
+.migration-limits p { color: var(--muted); margin: 6px 0 0 12px; }
 .mapping-content { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .mapping-content > .el-table { flex: 1; min-height: 0; }
 </style>

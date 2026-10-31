@@ -31,7 +31,7 @@ const concurrency = computed(() => {
   </section>
 </template>
 <style scoped>
-.job-panel { padding: 14px; border: 1px solid var(--el-border-color); border-radius: 6px; }
+.job-panel { padding: 14px; border: 1px solid var(--el-border-color); border-radius: 2px; }
 .job-heading { display: flex; gap: 16px; align-items: center; margin-bottom: 8px; }
 .job-time { margin-left: auto; color: var(--el-text-color-secondary); }
 .job-concurrency { margin: 0 0 8px; color: var(--el-text-color-secondary); font-size: 12px; }

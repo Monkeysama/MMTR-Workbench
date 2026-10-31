@@ -45,10 +45,10 @@ function inspect() {
 </template>
 
 <style scoped>
-.trace-toolbar { display: flex; gap: 12px; align-items: center; padding: 9px 16px; flex-shrink: 0; border-top: 1px solid #e8ebf0; background: #fafbfc; }
-.trace-status { flex: 1; min-width: 0; color: #697588; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-toolbar { display: flex; gap: 12px; align-items: center; padding: 9px 16px; flex-shrink: 0; border-top: 1px solid var(--edge); background: var(--surface-muted); }
+.trace-status { flex: 1; min-width: 0; color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-inspector { height: 100%; display: flex; flex-direction: column; min-height: 0; gap: 12px; }
-.trace-provenance { color: #697588; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-provenance { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-locations { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
-.trace-code { flex: 1; min-height: 0; border-radius: 6px; overflow: hidden; }
+.trace-code { flex: 1; min-height: 0; border-radius: 2px; overflow: hidden; }
 </style>

@@ -151,7 +151,7 @@ export function useWorkbench(options: {
     return (
       (await ask({
         title: "放弃当前修改？",
-        description: "当前文档中仍有编辑。请先另存为文件，或放弃后继续。",
+        description: "当前工作区仍有未保存修改。请先另存为文件，或放弃后继续。",
         value: "",
         kind: "confirm",
         confirmLabel: "放弃并继续",
@@ -220,7 +220,7 @@ export function useWorkbench(options: {
     await mdfEdits.drain();
     if (!dirty.value && !pendingWork.value) return true;
     return await ask({
-      title: "关闭此文档标签？",
+      title: "关闭此工作区？",
       description: "未导出的 MMTR/MDF 修改和 HLSL 草稿将被丢弃；后台任务将取消，未导出的变体候选将释放。",
       value: "", kind: "confirm", confirmLabel: "放弃并关闭",
     }) !== null;
@@ -608,7 +608,7 @@ export function useWorkbench(options: {
   }
   async function reset() {
     if (await discard("mmtr")) {
-      await mutate("reset", {}, "恢复原始文档…");
+      await mutate("reset", {}, "恢复原始 MMTR…");
       ir.value = "";
     }
   }
@@ -684,7 +684,7 @@ export function useWorkbench(options: {
     }
     const text = await ask({
       title: "批量同步 Shader 变体",
-      description: "当前编译结果用于选中 Shader；其它变体按“索引=DXBC完整路径”填写，多个项目用分号分隔。留空会先检查缺少的变体并保持文档不变。",
+      description: "当前编译结果用于选中 Shader；其它变体按“索引=DXBC完整路径”填写，多个项目用分号分隔。留空会先检查缺少的变体并保持当前文件不变。",
       value: "",
       kind: "text",
       confirmLabel: "检查并同步",
@@ -757,7 +757,7 @@ export function useWorkbench(options: {
       mdfDoc.value = state.mdf;
       if (state.doc) {
         doc.value = state.doc;
-        status.value = "已恢复内存中的文档";
+        status.value = "已恢复内存中的工作区";
       }
       revision.value = state.revision;
       exportedRevision.value = state.exported_revision;

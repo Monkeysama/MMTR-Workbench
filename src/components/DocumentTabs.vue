@@ -31,7 +31,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="workspace-tabs" :data-active="props.active" role="tablist" aria-label="打开的文档">
+  <div class="workspace-tabs" :data-active="props.active" role="tablist" aria-label="打开的工作区">
     <div v-for="(item, index) in props.tabs" :key="item.id" class="workspace-tab" :class="{ active: item.id === props.activeId }">
       <button class="workspace-tab-select" type="button" role="tab" :disabled="props.disabled"
         :aria-selected="item.id === props.activeId" :tabindex="item.id === props.activeId ? 0 : -1"
@@ -43,7 +43,7 @@ const emit = defineEmits<{
       <button class="workspace-tab-close" type="button" :disabled="props.disabled"
         :aria-label="`关闭 ${item.label}`" :title="`关闭 ${item.label}`" @click="emit('close', item.id)"><X :size="14" /></button>
     </div>
-    <button class="workspace-new" type="button" :disabled="props.disabled" aria-label="新建文档标签" title="新建文档标签" @click="emit('create')"><Plus :size="16" /></button>
+    <button class="workspace-new" type="button" :disabled="props.disabled" aria-label="新建工作区" title="新建工作区" @click="emit('create')"><Plus :size="16" /></button>
   </div>
 </template>
 
@@ -51,40 +51,53 @@ const emit = defineEmits<{
 .workspace-tabs {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
-  overflow-x: auto;
   flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.workspace-tab { display: flex; align-items: center; flex-shrink: 0; min-width: 0; }
+.workspace-tabs::-webkit-scrollbar { display: none; }
+.workspace-tab { position: relative; display: flex; align-items: stretch; flex-shrink: 0; border-right: 1px solid var(--edge); }
 .workspace-new,
 .workspace-tab-select,
 .workspace-tab-close {
   border: 0;
   background: transparent;
-  color: var(--el-text-color-secondary);
+  color: var(--muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 9px;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
   white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
 }
-.workspace-new:hover,
-.workspace-tab:hover,
-.workspace-tab.active {
-  color: var(--el-color-primary);
-  background: var(--el-fill-color-light);
+.workspace-tab-select .lucide { width: 13px; height: 13px; color: var(--dim); }
+.workspace-tab-select { min-width: 0; }
+.workspace-tab:hover { background: rgba(127, 227, 255, 0.035); }
+.workspace-tab.active { background: var(--surface-raised); }
+.workspace-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--accent);
 }
-.workspace-tab.active { border-bottom: 2px solid var(--el-color-primary); }
-.workspace-tab.active .workspace-tab-select { color: var(--el-color-primary); }
-.workspace-tab-label { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
-.workspace-tab-dirty { color: var(--el-color-warning); font-size: 12px; }
-.workspace-tab-close { padding: 0 5px; }
-.workspace-tab-close:hover { background: var(--el-fill-color); color: var(--el-color-danger); }
-.workspace-new { flex-shrink: 0; }
-button:disabled { opacity: 0.55; cursor: default; }
-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
-@media (max-width: 1100px) { .workspace-tab-label { max-width: 130px; } }
+.workspace-tab.active .workspace-tab-select { color: var(--ink); }
+.workspace-tab.active .workspace-tab-select .lucide { color: var(--accent); }
+.workspace-tab-label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.workspace-tab-dirty { color: var(--warning); font-size: 9px; }
+.workspace-tab-close { width: 25px; padding: 0; color: var(--dim); }
+.workspace-tab-close:hover { color: var(--danger); background: transparent; }
+.workspace-new { width: 33px; padding: 0; justify-content: center; border-right: 1px solid var(--edge); color: var(--dim); }
+.workspace-new:hover { color: var(--accent); background: var(--accent-soft); }
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 1100px) { .workspace-tab-label { max-width: 110px; } }
 </style>

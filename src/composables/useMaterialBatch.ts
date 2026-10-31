@@ -175,7 +175,7 @@ export function useMaterialBatch(options: {
       job.value = await request<MaterialJob>("material_job_status", { job_id: job.value.job_id });
       plan.value = null;
       planned = null;
-      notice.value = "独立变体已导出，原 MMTR/MDF 文档保持不变。";
+      notice.value = "独立变体已导出，原工作区保持不变。";
     } catch (exc) {
       error.value = message(exc);
       job.value = await request<MaterialJob>("material_job_status", { job_id: job.value.job_id }).catch(() => job.value);
