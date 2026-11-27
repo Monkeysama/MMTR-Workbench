@@ -102,9 +102,14 @@ def remove_material_interface(document, material, dll, actions, *, progress=None
                     if cb['name'] == 'UserMaterial' and layout.removed_parameters:
                         moves = {p.name: p for p in layout.parameters}
                         expected['size'] = layout.new.parameter_bytes
-                        expected['variables'] = [v for v in expected['variables'] if v['name'].removeprefix('VAR_') in moves]
+                        # CAPCOM_MATERIAL_RESERVE 保留成员由写回原位保留（removal_writer 已拒绝冲突情形）。
+                        expected['variables'] = [v for v in expected['variables']
+                                                 if v['name'].removeprefix('VAR_') in moves
+                                                 or re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', v['name'].removeprefix('VAR_'))]
                         for variable in expected['variables']:
-                            variable['offset'] = moves[variable['name'].removeprefix('VAR_')].new_offset
+                            name = variable['name'].removeprefix('VAR_')
+                            if name in moves:
+                                variable['offset'] = moves[name].new_offset
                     if updated != expected:
                         raise EditError('删除后常量缓冲反射与字段身份不一致。')
                 cache[key] = payload, after, len(expected_guards)

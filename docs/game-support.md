@@ -14,7 +14,7 @@
 | Resident Evil 3 | 1905100741 | 2.13 | 否 |
 | Street Fighter 6 | 221102761 / 250109895 | 2.31 | 否 |
 | Dragon's Dogma 2 | 240112003 / 240423143 / 260511270 | 2.51（待确认） | 否 |
-| Resident Evil Requiem | 251112994 | 2.51（待确认） | 否 |
+| [Resident Evil Requiem](re9-support.md) | 251112994 | 2.51（108 字节材质项） | 否 |
 | Pragmata | 251112995 | 2.51（待确认） | 否 |
 
 ## 未单独登记或未核实的游戏

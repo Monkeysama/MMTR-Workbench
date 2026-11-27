@@ -119,6 +119,67 @@ def _mesh_table_reads(definitions, origins):
     return result | oni
 
 
+_GEOMETRY_FIELD = re.compile(r'^;\s+u?int (?:geometry|geometryByteOffset);\s+; Offset:\s+(\d+)\s*$', re.M)
+_BIND_INFO = re.compile(r'^; Resource bind info for (\w+)\s*$', re.M)
+_FIELD_LOAD = re.compile(r'call %dx\.types\.ResRet\.i32 @dx\.op\.rawBufferLoad\.i32\(i32 139, '
+                         r'%dx\.types\.Handle (%[\w.]+), i32 %[\w.]+, i32 (\d+), i8 1, i32 4\)')
+_ROW_LOAD = re.compile(r'call %dx\.types\.ResRet\.i32 @dx\.op\.rawBufferLoad\.i32\(i32 139, '
+                       r'%dx\.types\.Handle (%[\w.]+), i32 (%[\w.]+), i32 0, i8 \d+, i32 4\)')
+
+
+def geometry_fields(ir):
+    """反射中各结构化资源元素的几何字段偏移 {资源名: {偏移}}；只认 geometry / geometryByteOffset 两个名称。"""
+    marks = list(_BIND_INFO.finditer(ir))
+    stop = ir.find('; Resource Bindings:')
+    fields = {}
+    for i, mark in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else (stop if stop > mark.start() else len(ir))
+        offsets = {int(offset) for offset in _GEOMETRY_FIELD.findall(ir[mark.start():end])}
+        if offsets:
+            fields[mark[1]] = offsets
+    return fields
+
+
+# RE9 光追与 meshlet：实例结构的 geometry* 字段给出几何记录在 BindlessBuffer 中的字节地址或 heap 下标。
+# 返回几何读取的 load 集合：直接读取几何字段，以及地址为 (几何值 + k) >> 4 [+ k] 的 BindlessBuffer 行（可链式）。
+# 这些行与材质数据共用 BindlessBuffer，但不是材质字段，迁移不能改写，覆盖检查也不能当作材质读取。
+def geometry_loads(ir, definitions, origins):
+    fields = geometry_fields(ir)
+    if not fields:
+        return set()
+
+    def text(value):
+        return definitions.get(value, {}).get('text', '')
+
+    def binding(handle):
+        return origins.get(handle, {}).get('binding', {}).get('name')
+
+    loads = {value for value, row in definitions.items()
+             if (field := _FIELD_LOAD.fullmatch(row['text'])) and int(field[2]) in fields.get(binding(field[1]), ())}
+
+    def derived(value):
+        lane = re.fullmatch(r'extractvalue %dx\.types\.ResRet\.i32 (%[\w.]+), [0-3]', text(value))
+        return bool(lane and lane[1] in loads)
+
+    changed = bool(loads)
+    while changed:
+        changed = False
+        for value, row in definitions.items():
+            load = value not in loads and _ROW_LOAD.fullmatch(row['text'])
+            if not load or binding(load[1]) != 'BindlessBuffer':
+                continue
+            address = text(load[2])
+            outer = re.fullmatch(r'(?:add(?: nuw)?(?: nsw)?|or) i32 (%[\w.]+), \d+', address)
+            row_index = re.fullmatch(r'lshr i32 (%[\w.]+), 4', text(outer[1]) if outer else address)
+            if not row_index:
+                continue
+            inner = re.fullmatch(r'add(?: nuw)?(?: nsw)? i32 (%[\w.]+), \d+', text(row_index[1]))
+            if derived(inner[1] if inner else row_index[1]):
+                loads.add(value)
+                changed = True
+    return loads
+
+
 # 解析来源明确的三类读取；只有通过材质表/heap-CBV构造证明身份的句柄进入返回值。
 def material_reads(ir, *, include_static=False, graph=None, header_bytes=None):
     header = material_header() if header_bytes is None else header_bytes
@@ -150,7 +211,7 @@ def material_reads(ir, *, include_static=False, graph=None, header_bytes=None):
             handles[key] = 'raw' if name == 'BindlessBuffer' else 'instance'
         elif include_static and name == 'UserMaterial' and origin.get('binding', {}).get('resource_class') == 2:
             handles[key] = 'static'
-    mesh = _mesh_table_reads(definitions, origins)
+    mesh = _mesh_table_reads(definitions, origins) | geometry_loads(ir, definitions, origins)
     result = []
     for value, row in definitions.items():
         text = row['text']
