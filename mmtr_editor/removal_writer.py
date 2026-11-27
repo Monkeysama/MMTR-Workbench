@@ -29,7 +29,11 @@ def patch_removal_declarations(ir, layout, reference):
             raise EditError('UserMaterial 声明尺寸与源布局不一致。')
         expected = {p.name: p for p in layout.parameters}
         variables = cb['variables']
-        if set(v['name'].removeprefix('VAR_') for v in variables) != set(expected) | set(layout.removed_parameters):
+        # MDF 不登记的 CAPCOM_MATERIAL_RESERVE 保留成员（RE9 常见）只在原位保留：偏移不变、仍在新参数区内、
+        # 且不与任何保留参数的新范围重叠；否则拒绝，不猜测保留成员的迁移位置。
+        reserved = {v['name'].removeprefix('VAR_'): v for v in variables
+                    if re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', v['name'].removeprefix('VAR_'))}
+        if set(v['name'].removeprefix('VAR_') for v in variables) - set(reserved) != set(expected) | set(layout.removed_parameters):
             raise EditError('UserMaterial 声明与 MDF 参数身份不完全一致。')
         type_match = re.search(r'^%UserMaterial = type \{ (.*?) \}$', ir, re.M)
         fields = type_match[1].split(', ') if type_match else []
@@ -46,6 +50,17 @@ def patch_removal_declarations(ir, layout, reference):
                 if variable['offset'] != move.old_offset or width != move.byte_size:
                     raise EditError('UserMaterial 字段类型或原偏移不一致。')
                 remaining_types.append(field)
+            elif name in reserved:
+                start, end = variable['offset'], variable['offset']+width
+                if end > layout.new.parameter_bytes or any(
+                        start < move.new_offset+move.byte_size and move.new_offset < end for move in layout.parameters):
+                    raise EditError('UserMaterial 保留成员无法在删除后原位保留。')
+                remaining_types.append(field)
+        # 结构字段按声明顺序布局；保留成员原位后，其余字段的新偏移仍须按原顺序递增。
+        kept_offsets = [expected[n].new_offset if n in expected else reserved[n]['offset']
+                        for n in (v['name'].removeprefix('VAR_') for v in variables) if n in expected or n in reserved]
+        if kept_offsets != sorted(set(kept_offsets)):
+            raise EditError('删除后 UserMaterial 字段顺序与新偏移不一致。')
         ir = ir[:type_match.start()]+f'%UserMaterial = type {{ {", ".join(remaining_types)} }}'+ir[type_match.end():]
         sizes = 0
         for key, value in list(nodes.items()):
@@ -70,6 +85,8 @@ def patch_removal_declarations(ir, layout, reference):
                     if name in expected:
                         nodes[field_key] = field.replace(f'i32 3, i32 {variable["offset"]},',
                                                        f'i32 3, i32 {expected[name].new_offset},', 1)
+                        kept.append(field_key)
+                    elif name in reserved:
                         kept.append(field_key)
                 nodes[annotation] = f'!{{i32 {layout.new.parameter_bytes}'+''.join(', !'+k for k in kept)+'}'
         if sizes != 1:
@@ -140,6 +157,7 @@ def remove_metadata(data, source, operation):
             raise EditError('UserMaterial 成员共享关系或源尺寸改变。')
         moves = {p['name']: p for p in layout['parameters']}
         members = bytearray()
+        kept, offsets = 0, []
         for member in first['members']:
             name = member['name']
             if name in moves:
@@ -149,11 +167,24 @@ def remove_metadata(data, source, operation):
                 row = bytearray(data[member['offset']:member['offset']+16])
                 struct.pack_into('<H', row, 12, move['new_offset'])
                 members.extend(row)
+                kept += 1
+                offsets.append(move['new_offset'])
+            elif re.fullmatch(r'CAPCOM_MATERIAL_RESERVE\d*', name):
+                # MDF 不登记的保留成员原位保留；与 DXIL 写回相同，越界或与保留参数重叠时拒绝。
+                start, end = member['byte_offset'], member['byte_offset']+member['byte_size']
+                if end > layout['new']['parameter_bytes'] or any(
+                        start < m['new_offset']+m['byte_size'] and m['new_offset'] < end for m in moves.values()):
+                    raise EditError('MMTR 保留成员无法在删除后原位保留。')
+                members.extend(data[member['offset']:member['offset']+16])
+                kept += 1
+                offsets.append(start)
             elif name not in layout['removed_parameters']:
                 raise EditError('MMTR 包含未纳入删除计划的成员。')
+        if offsets != sorted(set(offsets)):
+            raise EditError('删除后 MMTR 成员顺序与新偏移不一致。')
         pointer = append(members)
         for cb in entries:
-            struct.pack_into('<IIQ', prefix, cb['offset']+16, layout['new']['parameter_bytes'], len(moves), pointer)
+            struct.pack_into('<IIQ', prefix, cb['offset']+16, layout['new']['parameter_bytes'], kept, pointer)
     names = {entry['offset']: entry['name'] for entry in info['metadata']['srvs']}
     removed = set(layout['removed_textures'])
     cache = {}

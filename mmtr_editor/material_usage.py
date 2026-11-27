@@ -8,7 +8,7 @@ import hashlib
 import re
 
 from .dxil_sources import parse, handle_sources
-from .material_addresses import material_reads
+from .material_addresses import _mesh_table_reads, geometry_loads, material_reads
 
 _STATIC_CB = re.compile(r'call %dx\.types\.CBufRet\.(i32|f32|f16|i16) @dx\.op\.cbufferLoadLegacy\.\1\('
                         r'i32 59, %dx\.types\.Handle (%[\w.]+), i32 (\d+|%[\w.]+)\)')
@@ -16,22 +16,99 @@ _EXTRACT = r'extractvalue %dx\.types\.CBufRet\.{kind} {value}, ([0-7])'
 _LANE_BYTES = {'i32': 4, 'f32': 4, 'f16': 2, 'i16': 2}
 
 
-# 沿 SSA 使用链向前查找 heap 句柄构造；只用于区分“读取了描述符”与“用作资源句柄”。
-def _reaches_heap_handle(uses, ssa, limit=64):
-    pending, visited = [ssa], set()
-    while pending and len(visited) < limit:
+_GLOBAL = re.compile(r'@(?:"[^"]*"|[\w.$]+)')
+_MEMORY_OPS = ('store ', 'atomicrmw ', 'cmpxchg ')
+_MEMORY_READS = ('load ', 'atomicrmw ', 'cmpxchg ')
+
+
+def _pointer_operand(text):
+    """内存指令或 GEP/cast 的指针操作数：首个 `* ` 之后的 SSA、全局或内联常量 GEP；无法识别返回 None。"""
+    position = text.find('* ')
+    if position < 0:
+        return None
+    rest = text[position+2:]
+    if rest.startswith('getelementptr'):
+        names = set(_GLOBAL.findall(rest.split('), ', 1)[0]))
+        return names.pop() if len(names) == 1 else None
+    operand = re.match(r'%[\w.]+|' + _GLOBAL.pattern, rest)
+    return operand[0] if operand else None
+
+
+def _memory_base(definitions, pointer, limit=64):
+    """沿 GEP/bitcast 回溯指针到本函数 alloca 或模块全局（groupshared / static）；其它来源返回 None。
+
+    DXIL 中可写的全局只有 groupshared 与线程私有 static，二者都只在本 Shader 内可见。
+    """
+    for _ in range(limit):
+        if pointer is None:
+            return None
+        if pointer.startswith('@'):
+            return pointer
+        body = definitions.get(pointer, {}).get('text', '')
+        if body.startswith('alloca '):
+            return pointer
+        if not re.match(r'(?:getelementptr|bitcast|addrspacecast)\b', body):
+            return None
+        pointer = _pointer_operand(body)
+    return None
+
+
+# 沿 SSA 使用链做函数内完整前向闭包，判断材质取值是否流入 heap 句柄构造；
+# 只用于区分“读取了描述符”与“用作资源句柄”。写入本函数 alloca 或 Shader 内全局（groupshared/static）的值，
+# 经同一内存基址的全部读取继续追踪；写入无法解析的指针或进入未知函数时无法证明，返回 None。
+# llvm.lifetime 只标记生命周期，不传递取值。
+def _reaches_heap_handle(uses, ssa, definitions=None, limit=200000):
+    definitions = definitions or {}
+    reads_by_base = None
+    pending, visited, tainted_bases = [ssa], set(), set()
+    while pending:
+        if len(visited) >= limit:
+            return None
         value = pending.pop()
         if value in visited:
             continue
         visited.add(value)
         for row in uses.get(value, ()):
-            if '@dx.op.createHandleFromHeap' in row['text']:
+            text = row['text']
+            if '@dx.op.createHandleFromHeap' in text:
                 return True
-            if re.search(r'\bcall\b', row['text']) and '@dx.op.' not in row['text']:
+            if re.search(r'\bcall\b', text) and '@dx.op.' not in text:
+                if re.search(r'@llvm\.lifetime\.(?:start|end)\b', text):
+                    continue
                 return None
+            if text.startswith(_MEMORY_OPS):
+                base = _memory_base(definitions, _pointer_operand(text))
+                if base is None:
+                    return None
+                if base not in tainted_bases:
+                    tainted_bases.add(base)
+                    if reads_by_base is None:
+                        reads_by_base = {}
+                        for name, item in definitions.items():
+                            if item['text'].startswith(_MEMORY_READS):
+                                key = _memory_base(definitions, _pointer_operand(item['text']))
+                                reads_by_base.setdefault(key, []).append(name)
+                    # 基址无法解析的读取可能读到任意内存，保守地一并追踪。
+                    pending.extend(reads_by_base.get(base, ()))
+                    pending.extend(reads_by_base.get(None, ()))
             if row['value']:
                 pending.append(row['value'])
-    return None if pending else False
+    return False
+
+
+_BYTE_ADDRESS_ANNOTATION = re.compile(r'call %dx\.types\.Handle @dx\.op\.annotateHandle\(i32 216, %dx\.types\.Handle '
+                                      r'%[\w.]+, %dx\.types\.ResourceProperties \{ i32 11, i32 0 \}\)')
+
+
+# heap ByteAddressBuffer 的下标直接取自 loads 中某次读取的 lane 时返回 True。RE9 两种来源：
+# 几何记录（geometry_loads：meshlet 与光追的顶点/索引缓冲）与材质字段（GPBF 槽，读的是 MDF 引用的资源内容）。
+# 只接受 ByteAddressBuffer 注解与直接 extractvalue 下标；材质 CB 等其它 heap 读取不受影响。
+def _heap_buffer_indexed_by(definitions, origins, handle, loads):
+    if not _BYTE_ADDRESS_ANNOTATION.fullmatch(definitions.get(handle, {}).get('text', '')):
+        return False
+    descriptor = origins.get(handle, {}).get('descriptor_definition', {}).get('text', '')
+    lane = re.fullmatch(r'extractvalue %dx\.types\.(?:ResRet|CBufRet)\.i32 (%[\w.]+), [0-7]', descriptor)
+    return bool(lane and lane[1] in loads)
 
 
 def _material_handle_gaps(definitions, uses, origins, recognized_loads, cbuffer_name):
@@ -90,7 +167,7 @@ def _function_input_reads(ir, cbuffer_name, header_bytes=0):
                 if uses.get(extract['ssa']):
                     # 参数实例流只含参数区；其偏移不能解释为尾部纹理/GPBF字段。
                     result['instance' if read['kind'] == 'instance' else 'record'].add(extract['offset'])
-                    reaches = _reaches_heap_handle(uses, extract['ssa'])
+                    reaches = _reaches_heap_handle(uses, extract['ssa'], definitions)
                     if reaches:
                         result['record_handles'].add(extract['offset'])
                     elif reaches is None:
@@ -98,6 +175,13 @@ def _function_input_reads(ir, cbuffer_name, header_bytes=0):
     except ValueError as exc:
         result['errors'].append(('record', str(exc)))
     origins = handle_sources(ir, definitions)
+    material_loads = set(recognized_loads)
+    # 网格表读取已由 _mesh_table_reads 按确切形态证明，读出的是材质数据地址而非 MDF 字段；
+    # 其后基于该地址的读取仍由 material_reads 识别，这里只把网格表读取本身计为已覆盖的消费者。
+    recognized_loads |= _mesh_table_reads(definitions, origins)
+    # 几何记录读取（实例结构 geometry* 字段及其 BindlessBuffer 行）不是材质字段，同样计为已覆盖。
+    geometry = geometry_loads(ir, definitions, origins)
+    recognized_loads |= geometry
     static_cb = set()
     for value, origin in origins.items():
         binding = origin.get('binding')
@@ -129,6 +213,14 @@ def _function_input_reads(ir, cbuffer_name, header_bytes=0):
         if re.search(r'@dx.op\.(?:cbufferLoad|rawBufferLoad|bufferLoad)', row['text']):
             match = re.search(r'%dx.types.Handle (%[\w.]+)', row['text'])
             origin = origins.get(match[1], {}) if match else {}
+            if (origin.get('kind') == 'heap-descriptor' and geometry
+                    and _heap_buffer_indexed_by(definitions, origins, match[1], geometry)):
+                continue
+            # 以材质字段（如 GPBF 槽）为下标打开的 heap 缓冲：读的是 MDF 引用的资源内容而非材质数据，
+            # 与按描述符采样贴图同类；该字段本身已计入 record_handles。
+            if (origin.get('kind') == 'heap-descriptor'
+                    and _heap_buffer_indexed_by(definitions, origins, match[1], material_loads)):
+                continue
             if not origin or (origin.get('kind') == 'heap-descriptor' and value not in recognized_loads):
                 result['errors'].append(('all', f'缓冲读取来源或寻址未被覆盖：{row["text"]}'))
         if ('%dx.types.Handle' in row['text'] and row['text'].startswith(('phi ', 'select '))):

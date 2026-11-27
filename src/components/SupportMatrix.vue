@@ -61,7 +61,7 @@ const rows: SupportRow[] = [
   { id: "dd2", name: "Dragon's Dogma 2", games: ["DD2"], versions: [240112003, 240423143, 260511270],
     mdf: "2.51（待确认）", evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "re9", name: "Resident Evil Requiem", games: ["RE9"], versions: [251112994], mdf: "2.51",
-    evidence: "corpus", note: "真实语料已验证解析、重建与新增参数/贴图；删除不可用；未进行游戏内测试" },
+    evidence: "corpus", note: "真实语料已验证解析、重建、新增与有界删除；未进行游戏内测试" },
   { id: "pragmata", name: "Pragmata", games: ["PRAGMATA"], versions: [251112995], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
 ];

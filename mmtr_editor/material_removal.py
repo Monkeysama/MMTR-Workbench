@@ -126,6 +126,10 @@ def shader_removal_reads(ir, header_bytes=0):
     for function in functions:
         for call in re.findall(r'\b(?:call|invoke)\b[^\n]*', function):
             target = re.search(r'@([\w.$]+)\(', call)
+            # llvm.lifetime 只标记局部数组生命周期，不传参也不读写取值（RE9 的局部数组 Shader 常见）。
+            if re.match(r'call void @llvm\.lifetime\.(?:start|end)\(i64 \d+, i8\* '
+                        r'(?:%[\w.]+|bitcast \([^()]*\* @(?:"[^"]*"|[\w.$]+) to i8\*\))\)', call):
+                continue
             if not target or not target[1].startswith('dx.op.'):
                 errors.append(('all', '存在未证明的函数调用；本档不支持跨函数参数传递。'))
         try:

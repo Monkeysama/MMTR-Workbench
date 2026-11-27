@@ -137,14 +137,56 @@ define void @helper() {
         self.assertTrue(report['complete']['parameters'])
         self.assertEqual(states(report, 'parameters')['p2'], 'used')
 
-    def test_descriptor_traversal_limit_and_external_call_are_unknown(self):
-        chain = '\n'.join(f'  %c{i} = add i32 '+('%texB' if i == 0 else f'%c{i-1}')+', 1' for i in range(70))
+    # 前向闭包完整遍历函数内使用链：长链本身不再导致 unknown，只看是否流入 heap 句柄。
+    def test_long_descriptor_chain_is_followed_to_its_end(self):
+        chain = '\n'.join(f'  %c{i} = add i32 '+('%texB' if i == 0 else f'%c{i-1}')+', 1' for i in range(300))
         deep = HEAP_IR.replace('  %report = add i32 %texB, 7', chain)
+        report = usage([deep])
+        self.assertTrue(report['complete']['textures'])
+        self.assertEqual(states(report, 'textures')['texB'], 'descriptor')
+        handle = deep.replace('  ret void', '  %h2 = call %dx.types.Handle @dx.op.createHandleFromHeap(i32 218, i32 %c299, i1 false, i1 false)\n  ret void')
+        self.assertEqual(states(usage([handle]), 'textures')['texB'], 'used')
+
+    def test_external_call_or_unresolved_memory_is_unknown(self):
         escaped = HEAP_IR.replace('  %report = add i32 %texB, 7', '  call void @escape(i32 %texB)')
-        for ir in (deep, escaped):
-            report = usage([ir])
-            self.assertFalse(report['complete']['textures'])
-            self.assertEqual(states(report, 'textures')['texB'], 'unknown')
+        opaque = HEAP_IR.replace('  %report = add i32 %texB, 7', '  store i32 %texB, i32* %opaque, align 4')
+        for ir in (escaped, opaque):
+            with self.subTest(ir=ir):
+                report = usage([ir])
+                self.assertFalse(report['complete']['textures'])
+                self.assertEqual(states(report, 'textures')['texB'], 'unknown')
+
+    # groupshared 只在本 Shader 内可见：写入后经同一全局（含内联常量 GEP）的读取继续追踪。
+    def test_value_through_groupshared_is_tracked(self):
+        store = ('  %gp = getelementptr [8 x i32], [8 x i32] addrspace(3)* @"\\01?Cache@@3PAIA", i32 0, i32 %t\n'
+                 '  store i32 %texB, i32 addrspace(3)* %gp, align 4\n'
+                 '  %back = load i32, i32 addrspace(3)* getelementptr inbounds ([8 x i32], [8 x i32] addrspace(3)* '
+                 '@"\\01?Cache@@3PAIA", i32 0, i32 2), align 4\n')
+        plain = HEAP_IR.replace('  %report = add i32 %texB, 7', store + '  %sum = add i32 %back, 1')
+        self.assertEqual(states(usage([plain]), 'textures')['texB'], 'descriptor')
+        heap = HEAP_IR.replace('  %report = add i32 %texB, 7', store +
+                               '  %h2 = call %dx.types.Handle @dx.op.createHandleFromHeap(i32 218, i32 %back, i1 false, i1 false)')
+        report = usage([heap])
+        self.assertTrue(report['complete']['textures'])
+        self.assertEqual(states(report, 'textures')['texB'], 'used')
+
+    # 写入本函数局部数组的取值经同一 alloca 的 load 继续追踪；lifetime 标记不使分析失败。
+    def test_value_through_local_array_is_tracked(self):
+        local = '''  %arr = alloca [4 x i32], align 4
+  %raw = bitcast [4 x i32]* %arr to i8*
+  call void @llvm.lifetime.start(i64 16, i8* %raw) #0
+  %slot = getelementptr inbounds [4 x i32], [4 x i32]* %arr, i32 0, i32 1
+  store i32 %texB, i32* %slot, align 4
+  %any = getelementptr inbounds [4 x i32], [4 x i32]* %arr, i32 0, i32 %dyn
+  %back = load i32, i32* %any, align 4
+{use}  call void @llvm.lifetime.end(i64 16, i8* %raw) #0'''
+        stored = HEAP_IR.replace('  %report = add i32 %texB, 7', local.format(use='  %sum = add i32 %back, 1\n'))
+        self.assertEqual(states(usage([stored]), 'textures')['texB'], 'descriptor')
+        heap = HEAP_IR.replace('  %report = add i32 %texB, 7', local.format(
+            use='  %h2 = call %dx.types.Handle @dx.op.createHandleFromHeap(i32 218, i32 %back, i1 false, i1 false)\n'))
+        report = usage([heap])
+        self.assertTrue(report['complete']['textures'])
+        self.assertEqual(states(report, 'textures')['texB'], 'used')
 
     def test_heap_material_handle_escape_is_unknown(self):
         escaped = HEAP_IR.replace('  ret void', '  call void @escape(%dx.types.Handle %cb)\n  ret void')
