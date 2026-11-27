@@ -256,7 +256,10 @@ def current_layout(document, material, info=None):
     if info.get('material_header_bytes') is None:
         raise EditError('无法确定材质头，请使用完整的 MMTR 资源版本后缀。')
     buffers = [cb for cb in info['metadata']['cbuffers'] if cb['name'] == 'UserMaterial']
-    if not buffers or len({(cb['buffer_size'], cb['members_offset'], cb['member_count']) for cb in buffers}) != 1:
+    # 部分母版（如 RE9 眼球类）不在 metadata 登记 UserMaterial，无法按成员核对 MDF，直接拒绝。
+    if not buffers:
+        raise EditError('母版 metadata 没有 UserMaterial 常量缓冲，无法核对或扩展材质参数。')
+    if len({(cb['buffer_size'], cb['members_offset'], cb['member_count']) for cb in buffers}) != 1:
         raise EditError('UserMaterial共享成员布局不一致。')
     size = buffers[0]['buffer_size']
     textures = tuple(t['name'] for t in material['textures'])

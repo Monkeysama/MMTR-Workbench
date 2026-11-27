@@ -13,6 +13,9 @@ MHWILDS_VARIATION = MHWILDS_EXTRACT / 'natives/STM/MaterialShader/Variation'
 DETAILCOL_CORPUS = Path(os.environ.get(
     'MMTR_TEST_DETAILCOL_CORPUS', str(ROOT / 'output/pix/detailcol_reference')))
 
+# RE9 解包的 natives 目录（其下为 STM/...）；只读，用于 MMTR/MDF 解析、重建与 MDF-母版对照。
+RE9_NATIVES = Path(os.environ.get('MMTR_TEST_RE9_NATIVES', str(ROOT / 'output/corpus/re9/natives')))
+
 ORIGINAL_TOP_MDF_SHA256 = '2cfb7bfea54cebbd3e5f197cddbc2673dac0b0159fbeb4b94747d2d3674a3f46'
 ORIGINAL_TOP_MDF = Path(os.environ.get('MMTR_TEST_ORIGINAL_MDF',
     str(ROOT / 'output/pix/top_independent_masters/baseline/original.mdf2.45')))

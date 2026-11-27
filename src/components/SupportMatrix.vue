@@ -61,7 +61,7 @@ const rows: SupportRow[] = [
   { id: "dd2", name: "Dragon's Dogma 2", games: ["DD2"], versions: [240112003, 240423143, 260511270],
     mdf: "2.51（待确认）", evidence: "mmtr", note: "MDF 2.51 未单独验证" },
   { id: "re9", name: "Resident Evil Requiem", games: ["RE9"], versions: [251112994], mdf: "2.51",
-    evidence: "mmtr", note: "MDF 2.51 未单独验证" },
+    evidence: "corpus", note: "真实语料已验证解析、重建与新增参数/贴图；删除不可用；未进行游戏内测试" },
   { id: "pragmata", name: "Pragmata", games: ["PRAGMATA"], versions: [251112995], mdf: "2.51",
     evidence: "mmtr", note: "MDF 2.51 未单独验证" },
 ];
@@ -140,7 +140,7 @@ const mdfLabel = computed(() => props.mdfVersion === null ? null : `MDF 2.${prop
         </table>
       </div>
 
-      <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem、Pragmata、Dragon's Dogma 2（MMTR 260511270）的真实文件布局尚未核实。</p>
+      <p class="support-footnote">MDF 2.51 支持 104 字节和 108 字节两种材质项；Resident Evil Requiem 使用 108 字节材质项（真实语料已核对），Pragmata、Dragon's Dogma 2（MMTR 260511270）的真实文件布局尚未核实。</p>
 
       <h3 class="support-section-title">未单独登记或未核实的游戏</h3>
       <p class="support-intro">版本号是游戏文件后缀，不代表已支持。“版本已登记”表示其他游戏使用相同编号，本游戏尚未核验；“待确认”表示文件及版本尚未核实。</p>
